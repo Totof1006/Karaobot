@@ -1,0 +1,22 @@
+{
+  "name": "karaoke-discord-bot",
+  "version": "1.0.0",
+  "description": "Bot Discord Karaobot — Karaoké complet avec votes, scores, classements, audio et paroles",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "@discordjs/voice": "^0.17.0",
+    "@discordjs/opus": "^0.9.0",
+    "ffmpeg-static": "^5.2.0",
+    "play-dl": "^1.9.7",
+    "libsodium-wrappers": "^0.7.13"
+  }
+}
