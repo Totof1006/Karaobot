@@ -1,13 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const { EmbedBuilder } = require('discord.js');
+const { getBeatLine } = require('./beatEngine'); // Assure-toi que ce fichier existe dans /utils
 
 const LYRICS_DIR = path.join(__dirname, '../lyrics');
 
-// ─── Parser LRC ──────────────────────────────────────────────────────────────
-// Format LRC :
-//   [mm:ss.xx] Texte de la ligne
-//   [00:12.50] 🎵 Premier couplet...
-//
 function parseLRC(content) {
   const lines = [];
   const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
@@ -18,22 +15,18 @@ function parseLRC(content) {
     const minutes = parseInt(match[1]);
     const seconds = parseInt(match[2]);
     const ms      = match[3].length === 2
-      ? parseInt(match[3]) * 10   // centisecondes → ms
-      : parseInt(match[3]);       // millisecondes
+      ? parseInt(match[3]) * 10
+      : parseInt(match[3]);
     const text = match[4].trim();
     lines.push({ timeMs: minutes * 60_000 + seconds * 1_000 + ms, text });
   }
-
   return lines.sort((a, b) => a.timeMs - b.timeMs);
 }
 
-// ─── Chercher le fichier LRC ──────────────────────────────────────────────────
-// Normalise le nom de chanson en nom de fichier :
-//   "Bohemian Rhapsody" → "bohemian_rhapsody.lrc"
 function slugify(name) {
   return name
     .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // supprime accents
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '');
 }
@@ -52,51 +45,83 @@ function getLyrics(songName) {
   return parseLRC(content);
 }
 
-// ─── Diffuseur de paroles ─────────────────────────────────────────────────────
-// Envoie chaque ligne au bon moment dans le channel Discord.
-// Retourne une fonction stop() pour annuler proprement.
+// ─── Diffuseur de paroles avec Rythme ───
 function startLyricsStream(channel, lines, onFinish) {
   if (!lines || lines.length === 0) return () => {};
 
   const timers = [];
+  const intervals = [];
   const startTime = Date.now();
+  let lyricsMessage = null;
 
-  for (const line of lines) {
-    if (!line.text) continue; // ignorer les lignes vides
-
+  lines.forEach((line, index) => {
     const delay = line.timeMs - (Date.now() - startTime);
-    if (delay < 0) continue; // déjà passé
+    if (delay < 0) return;
 
     const t = setTimeout(async () => {
-      try {
-        await channel.send({
-          content: `🎵 ${line.text}`,
-          allowedMentions: { parse: [] }, // pas de @mentions accidentelles
-        });
-      } catch (e) {
-        // Ignoré : le salon peut avoir été supprimé entre-temps
-        if (!e.message?.includes('Unknown Channel')) {
-          console.warn('[Paroles] Envoi ligne échoué :', e.message);
+      // On définit la durée de la ligne (jusqu'à la suivante ou 5s)
+      const nextLine = lines[index + 1];
+      const lineDuration = nextLine ? (nextLine.timeMs - line.timeMs) : 5000;
+      const lineStart = Date.now();
+      const beatPattern = "⬛⬛⬛🟩⬛⬛⬛🟩";
+
+      const updateDisplay = async () => {
+        const elapsed = Date.now() - lineStart;
+        // On arrête l'animation si on dépasse la durée
+        if (elapsed >= lineDuration) return;
+
+        const rhythmBar = getBeatLine(beatPattern, lineDuration, elapsed);
+        
+        const embed = new EmbedBuilder()
+          .setColor(0xFF69B4)
+          .setTitle("🎤 Karaoké en cours...")
+          .setDescription(`## ${line.text}\n\n${rhythmBar}`)
+          .setFooter({ text: "Suivez le curseur 🎙️ pour le rythme !" });
+
+        try {
+          if (!lyricsMessage) {
+            lyricsMessage = await channel.send({ embeds: [embed] });
+          } else {
+            await lyricsMessage.edit({ embeds: [embed] });
+          }
+        } catch (e) {
+          if (!e.message?.includes('Unknown Message')) {
+            console.warn('[Lyrics] Edit échoué :', e.message);
+          }
         }
-      }
+      };
+
+      // Premier affichage de la ligne
+      await updateDisplay();
+
+      // Animation du rythme (800ms pour éviter le rate-limit Discord)
+      const animInterval = setInterval(updateDisplay, 800);
+      intervals.push(animInterval);
+
+      // Nettoyage de l'intervalle à la fin de la ligne
+      setTimeout(() => {
+        clearInterval(animInterval);
+        const idx = intervals.indexOf(animInterval);
+        if (idx > -1) intervals.splice(idx, 1);
+      }, lineDuration);
+
     }, delay);
 
     timers.push(t);
-  }
+  });
 
-  // Callback quand toutes les paroles sont passées
-  if (lines.length > 0) {
-    const lastTime  = lines[lines.length - 1].timeMs + 3_000;
-    const endDelay  = Math.max(0, lastTime - (Date.now() - startTime));
-    const endTimer  = setTimeout(() => {
-      if (onFinish) onFinish();
-    }, endDelay);
-    timers.push(endTimer);
-  }
+  // Fin de la chanson
+  const lastLine = lines[lines.length - 1];
+  const endDelay = Math.max(0, lastLine.timeMs + 3000 - (Date.now() - startTime));
+  const endTimer = setTimeout(() => {
+    if (onFinish) onFinish();
+  }, endDelay);
+  timers.push(endTimer);
 
-  // Retourne une fonction pour tout arrêter
+  // Retourne la fonction de stop
   return function stop() {
-    timers.forEach(t => clearTimeout(t));
+    timers.forEach(clearTimeout);
+    intervals.forEach(clearInterval);
   };
 }
 
