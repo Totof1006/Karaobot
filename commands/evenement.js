@@ -127,17 +127,26 @@ module.exports = {
     // channelId         = salon vocal karaoké (session, micros, votes en direct)
     // announceChannelId = salon texte annonces (inscriptions, boutons, récaps)
     const savedVoiceChId = loadVoiceChannel(guildId);
-    createEvent(guildId, {
-      hostId            : interaction.user.id,
-      channelId         : savedVoiceChId || interaction.channelId, // salon vocal si défini
-      announceChannelId : targetChannel.id,                         // salon texte #karaoké-annonces
-      title             : titre,
-      eventDate,
-      registrationStart,
-      registrationEnd,
-      announceMsgId     : msg.id,
-      discordEventId,
+
+// Sécurité : on vérifie que le salon vocal est bien en mémoire
+if (!savedVoiceChId) {
+    return interaction.editReply({
+        embeds: [errorEmbed("❌ Aucun salon vocal n'est configuré. Utilisez d'abord la commande de configuration du salon vocal.")],
+        ephemeral: true
     });
+}
+
+createEvent(guildId, {
+    hostId            : interaction.user.id,
+    channelId         : savedVoiceChId, // On utilise UNIQUEMENT l'ID en mémoire
+    announceChannelId : targetChannel.id, 
+    title             : titre,
+    eventDate,
+    registrationStart,
+    registrationEnd,
+    announceMsgId     : msg.id,
+    discordEventId,
+});
 
     await interaction.editReply({
       embeds: [
