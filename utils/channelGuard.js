@@ -43,28 +43,43 @@ function checkAnnouncementButton(interaction) {
 }
 
 /**
- * Vérifie que les commandes sont utilisées dans
- * le salon Karaoké-annonce ou Karaoke-vocal.
+ * Vérifie que /inscrire, /inscrire-chansons, /voir-evenement
+ * sont tapées dans le salon annonces (#karaoké-annonces).
  */
-
-function checkKaraokeChannel(interaction) {
+function checkCommandChannel(interaction) {
   const event = getEvent(interaction.guildId);
 
-  if (!event) return { ok: true };
+  if (!event) return { ok: true }; // pas d'événement = pas de restriction
 
-  const allowedChannelIds = [
-    event.announceChannelId, // Karaoké-annonce
-    event.channelId          // Karaoke-vocal
-  ].filter(Boolean);
-
-  if (!allowedChannelIds.includes(interaction.channelId)) {
+  const expectedChannelId = event.announceChannelId || event.channelId;
+  if (expectedChannelId && interaction.channelId !== expectedChannelId) {
     return {
-      ok: false,
-      reason: `Cette commande doit être utilisée dans <#${event.announceChannelId}> ou <#${event.channelId}>.`,
+      ok    : false,
+      reason: `Cette commande doit être utilisée dans <#${expectedChannelId}>.`,
     };
   }
 
   return { ok: true };
 }
 
-module.exports = { checkAnnouncementButton, checkKaraokeChannel };
+/**
+ * Vérifie que /karaoke, /lancer-evenement, /rejouer
+ * sont tapées dans le salon vocal karaoké.
+ */
+function checkSessionChannel(interaction) {
+  const event = getEvent(interaction.guildId);
+
+  if (!event) return { ok: true }; // pas d'événement = session libre, pas de restriction
+
+  const expectedChannelId = event.channelId;
+  if (expectedChannelId && interaction.channelId !== expectedChannelId) {
+    return {
+      ok    : false,
+      reason: `Cette commande doit être utilisée dans le salon vocal karaoké <#${expectedChannelId}>.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+module.exports = { checkAnnouncementButton, checkCommandChannel, checkSessionChannel };
