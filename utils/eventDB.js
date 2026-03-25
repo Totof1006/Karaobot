@@ -75,13 +75,18 @@ function getEvent(guildId) {
 
 function deleteEvent(guildId) {
   const db = loadDB();
+  
   if (db[guildId]) {
-    // On ne supprime pas db[guildId] (qui contient peut-être des configs)
-    // On remet juste à zéro les infos de l'événement
-    db[guildId] = {
-      registrations: [],
-      // On peut garder d'autres infos ici si besoin
-    };
+    // 1. On garde ce qu'il y avait (configs, etc.)
+    // 2. On nettoie spécifiquement les données de session
+    db[guildId].registrations = [];
+    db[guildId].title = null;
+    db[guildId].eventDate = null;
+    db[guildId].discordEventId = null;
+    
+    // Si tu utilises une sous-clé "event", tu peux juste faire :
+    // delete db[guildId].event;
+    
     saveDB(db);
   }
 }
