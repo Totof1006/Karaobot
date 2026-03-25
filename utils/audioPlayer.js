@@ -21,11 +21,6 @@ const activeConnections = new Map();
 
 /**
  * Rejoindre le salon vocal et jouer un lien (YouTube ou Direct).
- * @param {VoiceChannel} voiceChannel - Le salon
- * @param {string} audioUrl - Le lien
- * @param {Function} onFinish - Callback fin
- * @param {Function} onError - Callback erreur
- * @param {string} singerId - ID du chanteur (Optionnel pour l'étape 1)
  */
 async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = null) {
   const guildId = voiceChannel.guild.id;
@@ -35,7 +30,7 @@ async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = n
     channelId: voiceChannel.id,
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: false, // INDISPENSABLE : Le bot doit entendre
+    selfDeaf: false,
     selfMute: false,
   });
 
@@ -43,15 +38,12 @@ async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = n
     await entersState(connection, VoiceConnectionStatus.Ready, AUDIO_CONNECT_TIMEOUT_MS);
     
     // --- INTÉGRATION ÉTAPE 1 ---
-    // Si on a un singerId, on active l'écoute immédiatement après la connexion
     if (singerId) {
       const receiver = setupUserReceiver(connection, singerId);
-      // On stocke le receiver dans la map pour pouvoir le fermer plus tard si besoin
-      const currentData = activeConnections.get(guildId) || {};
-      activeConnections.set(guildId, { ...currentData, connection, receiver });
+      activeConnections.set(guildId, { connection, receiver });
+    } else {
+      activeConnections.set(guildId, { connection });
     }
-    // ----------------------------
-
   } catch (err) {
     connection.destroy();
     if (onError) onError(new Error('Impossible de rejoindre le salon vocal.'));
@@ -75,7 +67,6 @@ async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = n
     player.play(resource);
     connection.subscribe(player);
     
-    // Mise à jour de la map avec le player
     const existing = activeConnections.get(guildId);
     activeConnections.set(guildId, { ...existing, player });
 
@@ -111,13 +102,55 @@ function stopAudio(guildId) {
   const active = activeConnections.get(guildId);
   if (!active) return;
   try {
-    active.player.stop(true);
-    // Le receiver se coupe automatiquement quand la connexion est détruite
-    active.connection.destroy();
+    if (active.player) active.player.stop(true);
+    if (active.connection) active.connection.destroy();
   } catch (_) {}
   activeConnections.delete(guildId);
 }
 
-// ... (isValidAudioUrl et playLocalAudio restent inchangés)
+/**
+ * Validation URL
+ */
+function isValidAudioUrl(url) {
+  if (!url) return false;
+  try {
+    if (play.yt_validate(url)) return true;
+    const u = new URL(url);
+    const ext = u.pathname.split('.').pop().toLowerCase().split('?')[0];
+    return ['mp3', 'ogg', 'wav', 'flac', 'aac', 'opus', 'webm', 'm4a'].includes(ext);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Joue un fichier local (ex: applaudissements).
+ */
+async function playLocalAudio(voiceChannel, filename, onFinish) {
+  const filePath = path.join(SOUNDS_DIR, filename);
+  if (!fs.existsSync(filePath)) return () => {};
+
+  const guildId = voiceChannel.guild.id;
+  const existing = activeConnections.get(guildId);
+  if (!existing?.connection) return () => {};
+
+  const ambientPlayer = createAudioPlayer();
+  const resource = createAudioResource(filePath);
+
+  ambientPlayer.play(resource);
+  existing.connection.subscribe(ambientPlayer);
+
+  const cleanup = () => {
+    try { ambientPlayer.stop(true); } catch (_) {}
+    if (existing.player) existing.connection.subscribe(existing.player);
+  };
+
+  ambientPlayer.on(AudioPlayerStatus.Idle, () => {
+    cleanup();
+    if (onFinish) onFinish();
+  });
+
+  return cleanup;
+}
 
 module.exports = { playAudio, playLocalAudio, stopAudio, isValidAudioUrl };
