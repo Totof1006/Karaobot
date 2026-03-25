@@ -43,27 +43,34 @@ function saveDB(db) {
  */
 function createEvent(guildId, opts) {
   const db = loadDB();
-  db[guildId] = {
+
+  // On initialise l'objet du serveur s'il n'existe pas encore
+  // pour ne pas perdre ce qui est déjà dedans (comme le salon vocal)
+  if (!db[guildId]) db[guildId] = {};
+
+  // On stocke les données dans db[guildId].event au lieu de db[guildId] directement
+  db[guildId].event = {
     hostId            : opts.hostId,
-    channelId         : opts.channelId,         // salon karaoké vocal/texte (inscriptions + session)
-    announceChannelId : opts.announceChannelId || opts.channelId, // salon texte annonces (#karaoké)
+    channelId         : opts.channelId, 
+    announceChannelId : opts.announceChannelId || opts.channelId,
     title             : opts.title,
     eventDate         : opts.eventDate.toISOString(),
     registrationStart : opts.registrationStart.toISOString(),
     registrationEnd   : opts.registrationEnd.toISOString(),
     announceMsgId     : opts.announceMsgId  || null,
-    discordEventId    : opts.discordEventId || null,  // ID événement natif Discord
+    discordEventId    : opts.discordEventId || null,
     reminderSent      : false,
     closeSent         : false,
     registrations     : [],
   };
+
   saveDB(db);
-  return db[guildId];
+  return db[guildId].event;
 }
 
 function getEvent(guildId) {
   const db = loadDB();
-  return db[guildId] || null;
+  return db[guildId]?.event || null;
 }
 
 function deleteEvent(guildId) {
