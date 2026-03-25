@@ -29,34 +29,19 @@ function saveDB(db) {
 
 // ─── CRUD événements ──────────────────────────────────────────────────────────
 
-/**
- * Crée un événement planifié.
- * @param {string} guildId
- * @param {object} opts
- *   - hostId          : ID Discord de l'hôte
- *   - channelId       : salon d'inscription
- *   - title           : titre de l'événement
- *   - eventDate       : Date JS — quand se déroule la session (vendredi)
- *   - registrationEnd : Date JS — fermeture des inscriptions (jeudi 12h)
- *   - registrationStart : Date JS — ouverture des inscriptions (dimanche 12h)
- *   - announceMsgId   : ID du message d'annonce épinglé
- */
 function createEvent(guildId, opts) {
   const db = loadDB();
-
-  // On initialise l'objet du serveur s'il n'existe pas encore
-  // pour ne pas perdre ce qui est déjà dedans (comme le salon vocal)
   if (!db[guildId]) db[guildId] = {};
 
-  // On stocke les données dans db[guildId].event au lieu de db[guildId] directement
+  // On range tout dans le tiroir .event
   db[guildId].event = {
     hostId            : opts.hostId,
     channelId         : opts.channelId, 
     announceChannelId : opts.announceChannelId || opts.channelId,
     title             : opts.title,
-    eventDate         : opts.eventDate.toISOString(),
-    registrationStart : opts.registrationStart.toISOString(),
-    registrationEnd   : opts.registrationEnd.toISOString(),
+    eventDate         : (opts.eventDate instanceof Date) ? opts.eventDate.toISOString() : opts.eventDate,
+    registrationStart : (opts.registrationStart instanceof Date) ? opts.registrationStart.toISOString() : opts.registrationStart,
+    registrationEnd   : (opts.registrationEnd instanceof Date) ? opts.registrationEnd.toISOString() : opts.registrationEnd,
     announceMsgId     : opts.announceMsgId  || null,
     discordEventId    : opts.discordEventId || null,
     reminderSent      : false,
@@ -70,30 +55,26 @@ function createEvent(guildId, opts) {
 
 function getEvent(guildId) {
   const db = loadDB();
+  // On lit uniquement dans le tiroir .event
   return db[guildId]?.event || null;
 }
 
 function deleteEvent(guildId) {
   const db = loadDB();
-  
   if (db[guildId]) {
-    // 1. On garde ce qu'il y avait (configs, etc.)
-    // 2. On nettoie spécifiquement les données de session
-    db[guildId].registrations = [];
-    db[guildId].title = null;
-    db[guildId].eventDate = null;
-    db[guildId].discordEventId = null;
-    
-    // Si tu utilises une sous-clé "event", tu peux juste faire :
-    // delete db[guildId].event;
-    
+    // On supprime proprement UNIQUEMENT le tiroir event
+    delete db[guildId].event; 
     saveDB(db);
   }
 }
 
-function saveEvent(guildId, event) {
+function saveEvent(guildId, eventData) {
   const db = loadDB();
-  db[guildId] = event;
+  if (!db[guildId]) db[guildId] = {};
+  
+  // TRÈS IMPORTANT : On sauvegarde dans .event pour que getEvent() le retrouve
+  db[guildId].event = eventData; 
+  
   saveDB(db);
 }
 
@@ -101,7 +82,7 @@ function saveEvent(guildId, event) {
 
 function registerPlayer(guildId, userId, username) {
   const db    = loadDB();
-  const event = db[guildId];
+  const event = db[guildId]?.event; // On ajoute .event ici
   if (!event) return { ok: false, reason: 'no_event' };
 
   const now = new Date();
@@ -117,20 +98,24 @@ function registerPlayer(guildId, userId, username) {
 
 function unregisterPlayer(guildId, userId) {
   const db    = loadDB();
-  const event = db[guildId];
+  const event = db[guildId]?.event; // On ajoute .event ici
   if (!event) return false;
+  
   const before = event.registrations.length;
   event.registrations = event.registrations.filter(r => r.userId !== userId);
+  
   saveDB(db);
   return event.registrations.length < before;
 }
 
 function setPlayerSongs(guildId, userId, songs) {
   const db    = loadDB();
-  const event = db[guildId];
+  const event = db[guildId]?.event; // On ajoute .event ici
   if (!event) return false;
+  
   const reg = event.registrations.find(r => r.userId === userId);
   if (!reg)  return false;
+  
   reg.songs = songs.slice(0, 3);
   saveDB(db);
   return true;
@@ -153,7 +138,15 @@ function formatDate(isoString) {
 // Retourne tous les guilds ayant un événement (pour le scheduler)
 function getAllEvents() {
   const db = loadDB();
-  return Object.entries(db).map(([guildId, event]) => ({ guildId, ...event }));
+  const list = [];
+  
+  for (const guildId in db) {
+    if (db[guildId].event) {
+      // On extrait l'événement du tiroir pour le scheduler
+      list.push({ guildId, ...db[guildId].event });
+    }
+  }
+  return list;
 }
 
 module.exports = {
