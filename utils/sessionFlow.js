@@ -13,6 +13,7 @@ const { getLyrics, startLyricsStream, slugify }        = require('./lyricsSync')
 const { findVoiceChannel, muteAllExcept,
         unmuteSingersOnly, unmuteAll }                 = require('./voiceManager');
 const { playAudio }                                    = require('./audioPlayer');
+const { analyzeVoiceActivity }                         = require('./voiceAnalyzer');
 const { endSongButton, nextSingerButton }              = require('./buttons');
 const { singingEmbed, errorEmbed, roundResultEmbed,
         finalLeaderboardEmbed }                        = require('./embeds');
@@ -195,21 +196,36 @@ async function startSingerTurn(ctx, session) {
     await channel.send({ content: `🔊 Lecture de **${songTitle}** dans le vocal…` });
 
     session.stopAudio = await playAudio(
-      voiceChannel, songUrl,
+      voiceChannel, 
+      songUrl,
       async () => {
         const s = getSession(guild.id);
         if (!s || s.phase !== 'singing') return;
         if (s.stopLyrics) { s.stopLyrics(); s.stopLyrics = null; }
-        // Verrouiller la phase AVANT l'await pour éviter le double appel
-        // si l'hôte clique sur "Fin de chanson" au même instant
         s.phase = 'voting';
         await channel.send({ content: `🎵 **${songTitle}** terminée ! Ouverture des votes…` });
         await revealResults({ channel, guild }, s);
       },
       async (err) => {
         await channel.send({ content: `⚠️ Erreur audio : ${err.message}` });
-      }
+      },
+      singer.userId
     );
+
+    // --- DETECTION DE VOIX ---
+    const connection = getVoiceConnection(guild.id);
+    if (connection && connection.receiver) {
+        try {
+            const receiverStream = connection.receiver.subscribe(singer.userId);
+            analyzeVoiceActivity(receiverStream, (energy) => {
+                session.lastVoiceActivity = Date.now();
+                session.currentVoiceEnergy = energy;
+                session.precisionTicks = (session.precisionTicks || 0) + 1;
+            });
+        } catch (e) {
+            console.warn("[Vocal] Impossible d'écouter le chanteur :", e.message);
+        }
+    }
 
     if (hasLyrics) session.stopLyrics = startLyricsStream(channel, lyrics, null);
   } else {
