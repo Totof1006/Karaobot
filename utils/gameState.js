@@ -181,33 +181,60 @@ function addVote(session, voterId, value) {
 function computeRoundScore(session) {
   const singer = getCurrentSinger(session);
   if (!singer) return 0;
-  const voteValues = [...session.votes.values()];
-  if (voteValues.length === 0) return 0;
-  const avg    = voteValues.reduce((a, b) => a + b, 0) / voteValues.length;
-  const points = Math.round(avg * 20);
-  singer.score += points;
 
-  // Mémoriser la chanson jouée (stocker l'objet complet)
+  // 1. RÉCUPÉRATION DES VOTES (Map)
+  // On s'assure que session.votes existe, sinon on prend un tableau vide
+  const voteValues = session.votes ? [...session.votes.values()] : [];
+  
+  // Note moyenne (sur 5 par défaut si Map vide, sinon calculée)
+  const avg = voteValues.length > 0 
+    ? voteValues.reduce((a, b) => a + b, 0) / voteValues.length 
+    : 2.5;
+
+  // 2. PRÉCISION VOCALE (Ticks accumulés dans sessionFlow.js)
+  // On divise par 25 pour obtenir un bonus (Max 2.5 points sur la moyenne)
+  const precisionBonus = Math.min((session.precisionTicks || 0) / 25, 2.5);
+
+  // 3. CALCUL DES POINTS (Moyenne + Bonus) * 20
+  const points = Math.round((avg + precisionBonus) * 20);
+  
+  // Mise à jour du score cumulé du chanteur
+  singer.score = (singer.score || 0) + points;
+
+  // 4. MÉMORISATION DE LA CHANSON
   const currentTitle = getSongTitle(session.currentSong);
-  const alreadyPlayed = singer.playedSongs.some(s =>
-    (typeof s === 'string' ? s : s.title) === currentTitle
-  );
-  if (session.currentSong && !alreadyPlayed) {
-    singer.playedSongs.push(session.currentSong);
+  if (session.currentSong) {
+    const alreadyPlayed = singer.playedSongs.some(s =>
+      (typeof s === 'string' ? s : s.title) === currentTitle
+    );
+    if (!alreadyPlayed) {
+      singer.playedSongs.push(session.currentSong);
+    }
   }
 
+  // 5. ENREGISTREMENT DANS L'HISTORIQUE
+  // Sécurité au cas où roundResults ne serait pas défini
+  if (!session.roundResults) session.roundResults = [];
+
   session.roundResults.push({
-    userId   : singer.userId,
-    username : singer.username,
-    song     : currentTitle,
-    votes    : voteValues.length,
-    avgScore : avg.toFixed(2),
-    points,
+    userId: singer.userId,
+    username: singer.username,
+    song: currentTitle,
+    votes: voteValues.length,
+    avgScore: avg.toFixed(2),
+    precision: (precisionBonus * 4).toFixed(1), // Note de précision affichée sur 10
+    points: points,
     totalScore: singer.score,
   });
+
+  // 6. NETTOYAGE POUR LE PROCHAIN TOUR
+  session.precisionTicks = 0;
+  if (session.votes && typeof session.votes.clear === 'function') {
+    session.votes.clear();
+  }
+
   return points;
 }
-
 function advanceToNextSinger(session) {
   session.currentSingerIndex++;
   session.votes      = new Map();
