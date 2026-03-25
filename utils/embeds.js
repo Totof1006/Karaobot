@@ -66,31 +66,51 @@ function votingEmbed(singer, song) {
 }
 
 function roundResultEmbed(result) {
+  // Calcul des étoiles pour la moyenne des votes
   const stars = '⭐'.repeat(Math.round(parseFloat(result.avgScore)));
+  
+  // Création d'une petite barre visuelle pour la précision (ex: 🟩🟩🟩⬜⬜)
+  const precisionValue = parseFloat(result.precision) || 0;
+  const greenSquares = Math.round(precisionValue / 2); // On divise par 2 pour avoir une barre sur 5
+  const bar = '🟩'.repeat(greenSquares) + '⬜'.repeat(5 - greenSquares);
+
   return new EmbedBuilder()
     .setColor(COLORS.green)
-    .setTitle(`📊 Résultats — ${result.username}`)
+    .setTitle(`📊 Performance de ${result.username}`)
+    .setDescription(`Bravo ! Voici le récapitulatif de ta prestation sur **${result.song}**.`)
     .addFields(
-      { name: '🎵 Chanson', value: result.song, inline: true },
-      { name: '🗳️ Votes reçus', value: `${result.votes}`, inline: true },
-      { name: '⭐ Moyenne', value: `${result.avgScore}/5 ${stars}`, inline: true },
+      { name: '🗳️ Avis du Public', value: `${result.avgScore}/5 ${stars}\n*(${result.votes} votes)*`, inline: true },
+      { name: '🎙️ Précision Vocale', value: `${result.precision}/10\n${bar}`, inline: true },
+      { name: '\u200B', value: '\u200B', inline: false }, // Séparateur invisible
       { name: '🏅 Points gagnés', value: `**+${result.points} pts**`, inline: true },
       { name: '🏆 Score total', value: `**${result.totalScore} pts**`, inline: true },
-    );
+    )
+    .setFooter({ text: "La précision vocale est basée sur ton activité micro pendant la chanson." });
 }
 
 function finalLeaderboardEmbed(leaderboard, session) {
   const medals = ['🥇', '🥈', '🥉'];
-  const rows = leaderboard.map(p => {
-    const medal = medals[p.rank - 1] || `${p.rank}.`;
-    return `${medal} <@${p.userId}> — **${p.score} pts**`;
+  
+  const rows = leaderboard.map((p, i) => {
+    const medal = medals[i] || `${i + 1}.`;
+    // Arrondi pour éviter les scores du type 120.33333333
+    const displayScore = Math.round(p.score || 0);
+    return `${medal} <@${p.userId}> — **${displayScore} pts**`;
   }).join('\n');
+
+  // Sécurité pour éviter que .length ne crash si le tableau est vide/undefined
+  const roundsCount = session.roundResults ? session.roundResults.length : 0;
+  const playersCount = session.players ? session.players.length : 0;
 
   return new EmbedBuilder()
     .setColor(COLORS.gold)
-    .setTitle('🏆 Classement Final — Let\'s Sing Discord !')
+    .setTitle('🏆 Classement Final — Let\'s Sing !')
     .setDescription(rows || '_Personne n\'a participé…_')
-    .setFooter({ text: 'Merci à tous d\'avoir participé ! 🎤' })
+    .addFields({ 
+        name: '📈 Statistiques', 
+        value: `👤 Chanteurs : ${playersCount}\n🎤 Tours joués : ${roundsCount}` 
+    })
+    .setFooter({ text: 'Session terminée • Merci d\'avoir chanté !' })
     .setTimestamp();
 }
 
