@@ -68,8 +68,14 @@ function getEvent(guildId) {
 
 function deleteEvent(guildId) {
   const db = loadDB();
-  delete db[guildId];
-  saveDB(db);
+  
+  if (db[guildId]) {
+    // On ne supprime que la propriété "event"
+    // On laisse "voiceChannelId" ou "config" intact
+    delete db[guildId].event; 
+    
+    saveDB(db);
+  }
 }
 
 function saveEvent(guildId, event) {
