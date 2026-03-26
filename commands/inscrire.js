@@ -103,7 +103,7 @@ async function handleModalSubmit(interaction) {
       const results = await response.json();
 
       // 3. On cherche le "Best Match" (écart < 5 secondes)
-      const bestMatch = results.find(l => Math.abs(l.duration - duration) < 5);
+      const bestMatch = results.find(l => Math.abs(l.duration - duration) < 15);
       
       return { 
         ok: !!bestMatch, 
