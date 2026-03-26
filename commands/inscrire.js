@@ -101,8 +101,6 @@ async function handleModalSubmit(interaction) {
 
   if (songs.length === 0) return interaction.reply({ embeds: [errorEmbed('Inscris au moins une chanson !')], ephemeral: true });
 
-  await interaction.deferReply({ ephemeral: true });
-
   const validationResults = await Promise.all(songs.map(async (s) => {
     if (!s.url) return { ok: false };
 
@@ -114,15 +112,29 @@ async function handleModalSubmit(interaction) {
       const response = await fetch(`https://lrclib.net/api/search?q=${searchQuery}`);
       const results = await response.json();
 
-      if (!results || !Array.isArray(results) || results.length === 0) return { ok: false };
+      if (!results || !Array.isArray(results) || results.length === 0) {
+          console.log(`[DEBUG] ${s.title}: Aucun résultat trouvé sur l'API.`);
+          return { ok: false };
+      }
 
+      // Filtrage avec logs détaillés pour comprendre le refus
       const bestMatch = results.find(l => {
         const diff = Math.abs(l.duration - duration);
-        return diff < 15 && (l.syncedLyrics || l.lineLyrics);
+        const hasLyrics = !!(l.syncedLyrics || l.lineLyrics || l.plainLyrics);
+        
+        // Log interne pour débugger chaque correspondance potentielle
+        console.log(`[DEBUG-CHECK] ${s.title} vs API(${l.id}): Diff=${diff.toFixed(1)}s, Paroles=${hasLyrics}`);
+        
+        return diff < 30 && hasLyrics;
       });
       
+      console.log(`[DEBUG] Résultat final pour ${s.title}: ${bestMatch ? '✅ MATCH à ' + bestMatch.duration + 's' : '❌ AUCUN MATCH'}`);
+
       return { ok: !!bestMatch, lyrics: bestMatch };
-    } catch (e) { return { ok: false }; }
+    } catch (e) {
+      console.error(`[ERREUR] Validation ${s.title}:`, e.message);
+      return { ok: false };
+    }
   }));
 
   // Sauvegarde
