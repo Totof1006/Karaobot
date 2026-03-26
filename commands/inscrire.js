@@ -78,7 +78,7 @@ async function handleModalSubmit(interaction) {
       title = plusSplit[0].trim();
       artist = plusSplit[1].trim();
     }
-    const url = urlPart && (isValidAudioUrl(urlPart) || urlPart.includes('youtube.com') || urlPart.includes('youtu.be')) 
+    const url = urlPart && (urlPart.includes('youtube.com') || urlPart.includes('youtu.be') || urlPart.startsWith('http')) 
                 ? urlPart : null;
     return { title, artist, url };
   }).filter(s => s !== null);
@@ -91,21 +91,21 @@ async function handleModalSubmit(interaction) {
     if (!s.url) return { ok: false };
 
     try {
-      // 1. Récupération de la durée (on s'assure que c'est bien des secondes)
+      // 1. Récupération de la durée via ffprobe
       let duration = await getAudioDuration(s.url);
-      if (duration > 10000) duration = duration / 1000; // Correction si millisecondes
+      if (duration > 10000) duration = duration / 1000; 
       
-      // 2. Recherche ultra-large sans le filtre duration direct (on filtrera nous-mêmes)
+      // 2. Recherche sur LRCLIB
       const searchQuery = encodeURIComponent(`${s.title} ${s.artist}`);
       const response = await fetch(`https://lrclib.net/api/search?q=${searchQuery}`);
       const results = await response.json();
 
-      if (!results || results.length === 0) return { ok: false };
+      if (!results || !Array.isArray(results) || results.length === 0) return { ok: false };
 
-      // 3. On cherche manuellement la meilleure correspondance avec une marge de 15s
+      // 3. Filtrage manuel avec marge de 15 secondes
       const bestMatch = results.find(l => {
         const diff = Math.abs(l.duration - duration);
-        return diff < 15 && l.syncedLyrics; // On veut impérativement du synchronisé
+        return diff < 15 && (l.syncedLyrics || l.lineLyrics);
       });
       
       console.log(`[DEBUG] ${s.title}: Audio=${Math.round(duration)}s, Found=${bestMatch ? Math.round(bestMatch.duration) : 'None'}s`);
@@ -117,31 +117,35 @@ async function handleModalSubmit(interaction) {
     }
   }));
 
-  // --- Sauvegarde des chansons ---
-  const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
+  // --- Sauvegarde des données ---
+  const { registerPlayer, setPlayerSongs } = require('../utils/eventDB'); // Vérifie tes imports si besoin
+  const alreadyRegistered = event.registrations?.find(r => r.userId === interaction.user.id);
+  
   if (!alreadyRegistered) {
     registerPlayer(guildId, interaction.user.id, interaction.user.username);
-    await assignSingerRole(interaction.guild, interaction.user.id);
   }
 
   setPlayerSongs(guildId, interaction.user.id, songs);
+  
+  // Met à jour l'affichage dans le salon
+  const { refreshAnnouncement } = require('../utils/embeds'); 
   await refreshAnnouncement(interaction, guildId);
 
-  // --- Construction de l'embed ---
+  // --- Construction de l'Embed de réponse ---
   const songLines = songs.map((s, i) => {
     const v = validationResults[i];
-    const lrcStatus = v.ok ? '✅ Sync' : '❌ Non sync/Introuvable';
-    const warning = !v.ok ? `\n   ⚠️ *Attention : Les paroles synchronisées ne correspondent pas (ou sont introuvables).*` : "";
-    return `🎵 **${s.title}** (${s.artist}) — Paroles ${lrcStatus}${warning}`;
+    const status = v.ok ? '✅ Sync' : '❌ Non sync/Introuvable';
+    const warning = !v.ok ? `\n   ⚠️ *Attention : Durée incohérente ou paroles absentes.*` : "";
+    return `🎵 **${s.title}** (${s.artist}) — ${status}${warning}`;
   }).join('\n');
 
   return interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setColor(v.ok ? 0x57F287 : 0xED4245)
+        .setColor(validationResults.every(v => v.ok) ? 0x57F287 : 0xED4245)
         .setTitle('🎤 Inscription traitée !')
-        .setDescription(`${songLines}`)
-        .setFooter({ text: 'Le score de précision dépend de la synchronisation Paroles/Audio.' })
+        .setDescription(songLines)
+        .setFooter({ text: 'Le score dépend de la synchronisation Paroles/Audio.' })
     ],
   });
 }
@@ -167,20 +171,38 @@ async function refreshAnnouncement(interaction, guildId) {
   } catch (e) { console.warn('Erreur refresh :', e.message); }
 }
 
+// Fonction réelle pour obtenir la durée (Nécessite ffmpeg/ffprobe sur Railway)
 async function getAudioDuration(url) {
-    // Ici, tu utiliseras ta méthode habituelle (ffprobe ou music-metadata)
-    // pour extraire la durée du lien 'url'.
-    // Renvoie un nombre (secondes).
+    try {
+        const ffmpeg = require('fluent-ffmpeg');
+        return new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(url, (err, metadata) => {
+                if (err) return resolve(0);
+                // Renvoie la durée en secondes
+                resolve(metadata.format.duration || 0);
+            });
+        });
+    } catch (e) {
+        return 0;
+    }
 }
 
-// Exportation propre de tout ce dont le bot a besoin
+// Exportation UNIQUE et COMPLETE
 module.exports = {
-  // Garde la commande slash et sa fonction execute
-  data: module.exports.data,
-  execute: module.exports.execute,
- 
-  // Expose les fonctions pour le système de boutons et de modals
-  showRegistrationModal,
-  handleModalSubmit,
-  refreshAnnouncement
+    data: new SlashCommandBuilder()
+        .setName('inscrire')
+        .setDescription('🎤 S\'inscrire à l\'événement karaoké planifié'),
+
+    async execute(interaction) {
+        const guard = checkCommandChannel(interaction);
+        if (!guard.ok) {
+            return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+        }
+        await showRegistrationModal(interaction);
+    },
+
+    // Fonctions exportées pour être appelées par ton index.js / interactionCreate
+    showRegistrationModal,
+    handleModalSubmit,
+    refreshAnnouncement
 };
