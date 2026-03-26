@@ -97,11 +97,13 @@ async function handleModalSubmit(interaction) {
             const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
             const results = await response.json();
             
-            // On augmente la marge à 30s pour éviter les erreurs de sync (image_681632.png)
+            // --- LA CORRECTION EST ICI ---
             const match = Array.isArray(results) && results.find(l => 
-                Math.abs(l.duration - duration) < 30 && (l.syncedLyrics || l.lineLyrics)
+                Math.abs(l.duration - duration) < 30 && (l.syncedLyrics || l.lineLyrics || l.plainLyrics)
             );
             return { ok: !!match };
+            // -----------------------------
+            
         } catch (e) { return { ok: false }; }
     }));
 
@@ -120,7 +122,7 @@ async function handleModalSubmit(interaction) {
     });
 }
 
-// 3. Export final (image_696bc6.png)
+// 3. Export final
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('inscrire')
