@@ -65,7 +65,6 @@ async function handleModalSubmit(interaction) {
   const event = getEvent(guildId);
   if (!event) return interaction.reply({ embeds: [errorEmbed('Événement introuvable.')], ephemeral: true });
 
-  // --- BLOC EXISTANT : Récupération des saisies ---
   const songs = [0, 1, 2].map(i => {
     const raw = interaction.fields.getTextInputValue(`song_${i}`).trim();
     if (!raw) return null;
@@ -88,34 +87,37 @@ async function handleModalSubmit(interaction) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  // --- NOUVEAU BLOC : Vérification Intelligente Durée + Paroles ---
   const validationResults = await Promise.all(songs.map(async (s) => {
-    if (!s.url) return { ok: false, reason: 'Pas d\'audio' };
+    if (!s.url) return { ok: false };
 
     try {
-      // 1. On récupère la durée réelle du fichier audio fourni
-      const duration = await getAudioDuration(s.url);
+      // 1. Récupération de la durée (on s'assure que c'est bien des secondes)
+      let duration = await getAudioDuration(s.url);
+      if (duration > 10000) duration = duration / 1000; // Correction si millisecondes
       
-      // 2. On cherche les paroles sur LRCLIB en filtrant par cette durée
-      // On utilise titre + artiste pour la précision de recherche
-      const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(s.title + ' ' + s.artist)}&duration=${Math.round(duration)}`;
-      const response = await fetch(searchUrl);
+      // 2. Recherche ultra-large sans le filtre duration direct (on filtrera nous-mêmes)
+      const searchQuery = encodeURIComponent(`${s.title} ${s.artist}`);
+      const response = await fetch(`https://lrclib.net/api/search?q=${searchQuery}`);
       const results = await response.json();
 
-      // 3. On cherche le "Best Match" (écart < 5 secondes)
-      const bestMatch = results.find(l => Math.abs(l.duration - duration) < 15);
+      if (!results || results.length === 0) return { ok: false };
+
+      // 3. On cherche manuellement la meilleure correspondance avec une marge de 15s
+      const bestMatch = results.find(l => {
+        const diff = Math.abs(l.duration - duration);
+        return diff < 15 && l.syncedLyrics; // On veut impérativement du synchronisé
+      });
       
-      return { 
-        ok: !!bestMatch, 
-        lyrics: bestMatch, 
-        durationDiff: bestMatch ? Math.abs(bestMatch.duration - duration) : null 
-      };
+      console.log(`[DEBUG] ${s.title}: Audio=${Math.round(duration)}s, Found=${bestMatch ? Math.round(bestMatch.duration) : 'None'}s`);
+
+      return { ok: !!bestMatch, lyrics: bestMatch };
     } catch (e) {
-      return { ok: false, reason: 'Erreur recherche' };
+      console.error(`Erreur validation ${s.title}:`, e.message);
+      return { ok: false };
     }
   }));
 
-  // --- SUITE DU CODE : Enregistrement ---
+  // --- Sauvegarde des chansons ---
   const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
   if (!alreadyRegistered) {
     registerPlayer(guildId, interaction.user.id, interaction.user.username);
@@ -125,30 +127,25 @@ async function handleModalSubmit(interaction) {
   setPlayerSongs(guildId, interaction.user.id, songs);
   await refreshAnnouncement(interaction, guildId);
 
-  // --- MISE À JOUR DE L'AFFICHAGE DU RÉSULTAT ---
+  // --- Construction de l'embed ---
   const songLines = songs.map((s, i) => {
     const v = validationResults[i];
     const lrcStatus = v.ok ? '✅ Sync' : '❌ Non sync/Introuvable';
-    const audioStatus = s.url ? '🔊' : '🔇';
-    
-    let warning = "";
-    if (!v.ok && s.url) {
-      warning = `\n   ⚠️ *Attention : La durée des paroles ne correspond pas à ton lien !*`;
-    }
-
-    return `🎵 **${s.title}** (${s.artist}) — Paroles ${lrcStatus} · Audio ${audioStatus}${warning}`;
+    const warning = !v.ok ? `\n   ⚠️ *Attention : Les paroles synchronisées ne correspondent pas (ou sont introuvables).*` : "";
+    return `🎵 **${s.title}** (${s.artist}) — Paroles ${lrcStatus}${warning}`;
   }).join('\n');
 
   return interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('✅ Inscription validée !')
-        .setDescription(`Tes chansons ont été vérifiées :\n\n${songLines}`)
+        .setColor(v.ok ? 0x57F287 : 0xED4245)
+        .setTitle('🎤 Inscription traitée !')
+        .setDescription(`${songLines}`)
         .setFooter({ text: 'Le score de précision dépend de la synchronisation Paroles/Audio.' })
     ],
   });
 }
+
 async function refreshAnnouncement(interaction, guildId) {
   try {
     const event = getEvent(guildId);
