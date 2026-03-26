@@ -7,19 +7,19 @@ const { errorEmbed } = require('../utils/embeds');
 const { checkCommandChannel } = require('../utils/channelGuard');
 const { MAX_SINGERS } = require('../utils/constants');
 
-// --- UTILITAIRES ---
-
+// 1. Définition des fonctions utilitaires
 async function getAudioDuration(url) {
-    const ffmpeg = require('fluent-ffmpeg');
-    return new Promise((resolve) => {
-        // Sécurité : si FFmpeg met plus de 5s, on renvoie 0
-        const timer = setTimeout(() => resolve(0), 5000);
-        ffmpeg.ffprobe(url, (err, metadata) => {
-            clearTimeout(timer);
-            if (err || !metadata) return resolve(0);
-            resolve(metadata.format.duration || 0);
+    try {
+        const ffmpeg = require('fluent-ffmpeg');
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => resolve(0), 5000);
+            ffmpeg.ffprobe(url, (err, metadata) => {
+                clearTimeout(timeout);
+                if (err || !metadata) return resolve(0);
+                resolve(metadata.format.duration || 0);
+            });
         });
-    });
+    } catch (e) { return 0; }
 }
 
 async function refreshAnnouncement(interaction, guildId) {
@@ -28,14 +28,13 @@ async function refreshAnnouncement(interaction, guildId) {
         if (!event?.announceMsgId) return;
         const announceChId = event.announceChannelId || event.channelId;
         const ch = await interaction.client.channels.fetch(announceChId).catch(() => null);
-        if (!ch || !event.registrations) return;
+        if (!ch) return;
+        const msg = await ch.messages.fetch(event.announceMsgId).catch(() => null);
+        if (!msg) return;
 
         const playerList = event.registrations.length === 0
             ? '_Aucun inscrit_'
             : event.registrations.map((r, i) => `${i + 1}. <@${r.userId}> — ✅`).join('\n');
-
-        const msg = await ch.messages.fetch(event.announceMsgId).catch(() => null);
-        if (!msg) return;
 
         const updatedEmbed = EmbedBuilder.from(msg.embeds[0])
             .spliceFields(3, 1, { name: `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`, value: playerList });
@@ -44,97 +43,94 @@ async function refreshAnnouncement(interaction, guildId) {
     } catch (e) { console.error('Erreur refresh:', e.message); }
 }
 
-// --- LOGIQUE ---
+// 2. Définition des gestionnaires de Modal
+async function showRegistrationModal(interaction) {
+    const event = getEvent(interaction.guildId);
+    if (!event) return interaction.reply({ embeds: [errorEmbed('Aucun événement !')], ephemeral: true });
 
+    const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
+    const existing = alreadyRegistered?.songs || [];
+
+    const modal = new ModalBuilder()
+        .setCustomId('modal_register_songs')
+        .setTitle('Inscription Karaoke');
+
+    const fields = [0, 1, 2].map((i) => {
+        const ex = existing[i];
+        const value = ex ? `${ex.title} + ${ex.artist} = ${ex.url}` : '';
+        return new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId(`song_${i}`)
+                .setLabel(`Chanson n°${i + 1} (Titre + Artiste = Lien)`)
+                .setStyle(TextInputStyle.Short)
+                .setValue(value)
+                .setRequired(i === 0)
+        );
+    });
+
+    modal.addComponents(...fields);
+    await interaction.showModal(modal);
+}
+
+async function handleModalSubmit(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const guildId = interaction.guildId;
+    const event = getEvent(guildId);
+
+    const songs = [0, 1, 2].map(i => {
+        const raw = interaction.fields.getTextInputValue(`song_${i}`).trim();
+        if (!raw) return null;
+        const eqSplit = raw.split('=');
+        const info = eqSplit[0].split('+');
+        return {
+            title: info[0]?.trim() || "Inconnu",
+            artist: info[1]?.trim() || "Inconnu",
+            url: eqSplit[1]?.trim() || null
+        };
+    }).filter(s => s !== null);
+
+    const validationResults = await Promise.all(songs.map(async (s) => {
+        if (!s.url) return { ok: false };
+        try {
+            let duration = await getAudioDuration(s.url);
+            const query = encodeURIComponent(`${s.title} ${s.artist}`);
+            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
+            const results = await response.json();
+            
+            // On augmente la marge à 30s pour éviter les erreurs de sync (image_681632.png)
+            const match = Array.isArray(results) && results.find(l => 
+                Math.abs(l.duration - duration) < 30 && (l.syncedLyrics || l.lineLyrics)
+            );
+            return { ok: !!match };
+        } catch (e) { return { ok: false }; }
+    }));
+
+    if (!event.registrations.find(r => r.userId === interaction.user.id)) {
+        registerPlayer(guildId, interaction.user.id, interaction.user.username);
+    }
+    setPlayerSongs(guildId, interaction.user.id, songs);
+    await refreshAnnouncement(interaction, guildId);
+
+    const songLines = songs.map((s, i) => 
+        `🎵 **${s.title}** — ${validationResults[i].ok ? '✅ Sync' : '❌ Non sync'}`
+    ).join('\n');
+
+    return interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('Inscription traitée !').setDescription(songLines).setColor(0x57F287)]
+    });
+}
+
+// 3. Export final (image_696bc6.png)
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('inscrire')
         .setDescription('🎤 S\'inscrire à l\'événement karaoké'),
-
     async execute(interaction) {
         const guard = checkCommandChannel(interaction);
         if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-        
-        const event = getEvent(interaction.guildId);
-        if (!event) return interaction.reply({ embeds: [errorEmbed('Aucun événement !')], ephemeral: true });
-
-        // Affichage du modal
-        const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
-        const existing = alreadyRegistered?.songs || [];
-        const modal = new ModalBuilder().setCustomId('modal_register_songs').setTitle('Karaoke');
-
-        const rows = [1, 2, 3].map((num, i) => {
-            const ex = existing[i];
-            const val = ex ? `${ex.title} + ${ex.artist} = ${ex.url}` : '';
-            return new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId(`song_${i}`).setLabel(`Chanson ${num}`).setStyle(TextInputStyle.Short)
-                    .setValue(val).setRequired(i === 0)
-            );
-        });
-        modal.addComponents(...rows);
-        await interaction.showModal(modal);
+        await showRegistrationModal(interaction);
     },
-
-    async handleModalSubmit(interaction) {
-        // CRITIQUE : On prévient Discord TOUT DE SUITE qu'on va être long
-        await interaction.deferReply({ ephemeral: true });
-
-        const guildId = interaction.guildId;
-        const event = getEvent(guildId);
-        
-        const songs = [0, 1, 2].map(i => {
-            const raw = interaction.fields.getTextInputValue(`song_${i}`).trim();
-            if (!raw) return null;
-            const parts = raw.split('=');
-            const info = parts[0].split('+');
-            return {
-                title: info[0]?.trim() || "Inconnu",
-                artist: info[1]?.trim() || "Inconnu",
-                url: parts[1]?.trim() || null
-            };
-        }).filter(s => s !== null);
-
-        const validationResults = await Promise.all(songs.map(async (s) => {
-            if (!s.url) return { ok: false };
-            try {
-                const duration = await getAudioDuration(s.url);
-                const query = encodeURIComponent(`${s.title} ${s.artist}`);
-                const res = await fetch(`https://lrclib.net/api/search?q=${query}`);
-                const data = await res.json();
-                const match = data.find(l => Math.abs(l.duration - duration) < 30 && (l.syncedLyrics || l.lineLyrics));
-                return { ok: !!match };
-            } catch (e) { return { ok: false }; }
-        }));
-
-        // Sauvegarde
-        if (!event.registrations.find(r => r.userId === interaction.user.id)) {
-            registerPlayer(guildId, interaction.user.id, interaction.user.username);
-        }
-        setPlayerSongs(guildId, interaction.user.id, songs);
-        await refreshAnnouncement(interaction, guildId);
-
-        const lines = songs.map((s, i) => `🎵 **${s.title}** : ${validationResults[i].ok ? '✅ Sync' : '❌ Non sync'}`).join('\n');
-        
-        // On utilise editReply car on a fait un deferReply au début
-        return interaction.editReply({
-            embeds: [new EmbedBuilder().setTitle('Inscription validée !').setDescription(lines).setColor(0x57F287)]
-        });
-    }
-};
-
-// --- EXPORTS ---
-
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('inscrire')
-    .setDescription('🎤 S\'inscrire à l\'événement karaoké planifié'),
-  async execute(interaction) {
-    const guard = checkCommandChannel(interaction);
-    if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-    await showRegistrationModal(interaction);
-  },
-  showRegistrationModal,
-  handleModalSubmit,
-  refreshAnnouncement
+    showRegistrationModal,
+    handleModalSubmit,
+    refreshAnnouncement
 };
