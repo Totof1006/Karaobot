@@ -90,7 +90,7 @@ module.exports = {
         // 3. Vérification de l'écart de durée (Sécurité Scoring)
         if (currentAudioDuration && data.duration) {
             const diff = Math.abs(data.duration - currentAudioDuration);
-            if (diff > 10) {
+            if (diff > 15) {
                 return interaction.editReply({
                     embeds: [errorEmbed(`⚠️ **Écart trop important !**\n\nMusique : ${Math.round(currentAudioDuration)}s\nParoles : ${Math.round(data.duration)}s\n\nLe scoring serait faussé. Cherche une autre version.`)],
                 });
