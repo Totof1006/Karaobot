@@ -62,32 +62,25 @@ async function showRegistrationModal(interaction) {
 
 async function handleModalSubmit(interaction) {
   const guildId = interaction.guildId;
-  const event   = getEvent(guildId);
+  const event = getEvent(guildId);
   if (!event) return interaction.reply({ embeds: [errorEmbed('Événement introuvable.')], ephemeral: true });
 
+  // --- BLOC EXISTANT : Récupération des saisies ---
   const songs = [0, 1, 2].map(i => {
     const raw = interaction.fields.getTextInputValue(`song_${i}`).trim();
     if (!raw) return null;
-
-    // 1. On isole le lien via le signe "="
     const eqSplit = raw.split('=');
     const infoPart = eqSplit[0].trim();
     const urlPart = eqSplit.length > 1 ? eqSplit[eqSplit.length - 1].trim() : null;
-
-    // 2. On isole le Titre et l'Artiste via le signe "+"
     const plusSplit = infoPart.split('+');
     let title = infoPart;
     let artist = "Inconnu";
-
     if (plusSplit.length > 1) {
       title = plusSplit[0].trim();
       artist = plusSplit[1].trim();
     }
-
     const url = urlPart && (isValidAudioUrl(urlPart) || urlPart.includes('youtube.com') || urlPart.includes('youtu.be')) 
-                ? urlPart 
-                : null;
-
+                ? urlPart : null;
     return { title, artist, url };
   }).filter(s => s !== null);
 
@@ -95,6 +88,34 @@ async function handleModalSubmit(interaction) {
 
   await interaction.deferReply({ ephemeral: true });
 
+  // --- NOUVEAU BLOC : Vérification Intelligente Durée + Paroles ---
+  const validationResults = await Promise.all(songs.map(async (s) => {
+    if (!s.url) return { ok: false, reason: 'Pas d\'audio' };
+
+    try {
+      // 1. On récupère la durée réelle du fichier audio fourni
+      const duration = await getAudioDuration(s.url);
+      
+      // 2. On cherche les paroles sur LRCLIB en filtrant par cette durée
+      // On utilise titre + artiste pour la précision de recherche
+      const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(s.title + ' ' + s.artist)}&duration=${Math.round(duration)}`;
+      const response = await fetch(searchUrl);
+      const results = await response.json();
+
+      // 3. On cherche le "Best Match" (écart < 5 secondes)
+      const bestMatch = results.find(l => Math.abs(l.duration - duration) < 5);
+      
+      return { 
+        ok: !!bestMatch, 
+        lyrics: bestMatch, 
+        durationDiff: bestMatch ? Math.abs(bestMatch.duration - duration) : null 
+      };
+    } catch (e) {
+      return { ok: false, reason: 'Erreur recherche' };
+    }
+  }));
+
+  // --- SUITE DU CODE : Enregistrement ---
   const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
   if (!alreadyRegistered) {
     registerPlayer(guildId, interaction.user.id, interaction.user.username);
@@ -104,14 +125,18 @@ async function handleModalSubmit(interaction) {
   setPlayerSongs(guildId, interaction.user.id, songs);
   await refreshAnnouncement(interaction, guildId);
 
-  // Recherche des paroles avec Titre + Artiste pour la précision
- const results = await Promise.all(songs.map(s => autoFetchLyrics(`${s.title} + ${s.artist}`)));
-
+  // --- MISE À JOUR DE L'AFFICHAGE DU RÉSULTAT ---
   const songLines = songs.map((s, i) => {
-    const r = results[i];
-    const lrcStatus = r.ok ? '✅' : '❌';
+    const v = validationResults[i];
+    const lrcStatus = v.ok ? '✅ Sync' : '❌ Non sync/Introuvable';
     const audioStatus = s.url ? '🔊' : '🔇';
-    return `🎵 **${s.title}** (${s.artist}) — Paroles ${lrcStatus} · Audio ${audioStatus}`;
+    
+    let warning = "";
+    if (!v.ok && s.url) {
+      warning = `\n   ⚠️ *Attention : La durée des paroles ne correspond pas à ton lien !*`;
+    }
+
+    return `🎵 **${s.title}** (${s.artist}) — Paroles ${lrcStatus} · Audio ${audioStatus}${warning}`;
   }).join('\n');
 
   return interaction.editReply({
@@ -119,12 +144,11 @@ async function handleModalSubmit(interaction) {
       new EmbedBuilder()
         .setColor(0x57F287)
         .setTitle('✅ Inscription validée !')
-        .setDescription(`Tes chansons :\n\n${songLines}`)
-        .setFooter({ text: 'Format : Titre + Artiste = Lien' })
+        .setDescription(`Tes chansons ont été vérifiées :\n\n${songLines}`)
+        .setFooter({ text: 'Le score de précision dépend de la synchronisation Paroles/Audio.' })
     ],
   });
 }
-
 async function refreshAnnouncement(interaction, guildId) {
   try {
     const event = getEvent(guildId);
@@ -146,12 +170,18 @@ async function refreshAnnouncement(interaction, guildId) {
   } catch (e) { console.warn('Erreur refresh :', e.message); }
 }
 
+async function getAudioDuration(url) {
+    // Ici, tu utiliseras ta méthode habituelle (ffprobe ou music-metadata)
+    // pour extraire la durée du lien 'url'.
+    // Renvoie un nombre (secondes).
+}
+
 // Exportation propre de tout ce dont le bot a besoin
 module.exports = {
   // Garde la commande slash et sa fonction execute
   data: module.exports.data,
   execute: module.exports.execute,
-  
+ 
   // Expose les fonctions pour le système de boutons et de modals
   showRegistrationModal,
   handleModalSubmit,
