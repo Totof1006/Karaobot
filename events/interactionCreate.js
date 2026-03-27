@@ -1,5 +1,5 @@
 const { EmbedBuilder, InteractionType } = require('discord.js');
-const ytdl = require('ytdl-core'); // IMPORT ESSENTIEL : nécessite npm install ytdl-core
+const ytdl = require('@distube/ytdl-core'); // IMPORT ESSENTIEL : nécessite npm install ytdl-core
 
 // --- IMPORTS DES UTILITAIRES ---
 const {
