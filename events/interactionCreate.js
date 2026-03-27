@@ -84,6 +84,84 @@ module.exports = {
       return;
     }
 
+    // ── BOUTON verification → lance FFmpeg ───────────────────────────────────
+const { EmbedBuilder } = require('discord.js');
+const { getEvent } = require('../utils/eventDB');
+
+// Fonction utilitaire pour obtenir la durée YouTube via FFmpeg
+async function getAudioDuration(url) {
+    const ffmpeg = require('fluent-ffmpeg');
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(0), 5000);
+        ffmpeg.ffprobe(url, (err, metadata) => {
+            clearTimeout(timeout);
+            if (err || !metadata) return resolve(0);
+            resolve(metadata.format.duration || 0);
+        });
+    });
+}
+
+// Fonction pour transformer des secondes en 0:00
+const formatTime = (s) => {
+    const min = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+};
+
+module.exports = {
+    name: 'interactionCreate',
+    async execute(interaction) {
+        // --- GESTION DES BOUTONS DE VÉRIFICATION ---
+        if (interaction.isButton() && interaction.customId.startsWith('verify_song_')) {
+            await interaction.deferUpdate(); // On prévient Discord qu'on traite le clic
+
+            const songIndex = parseInt(interaction.customId.split('_')[2]);
+            const event = getEvent(interaction.guildId);
+            const registration = event?.registrations.find(r => r.userId === interaction.user.id);
+            const song = registration?.songs[songIndex];
+
+            if (!song || !song.url) {
+                return interaction.followUp({ content: "❌ Impossible de retrouver les données de cette chanson.", ephemeral: true });
+            }
+
+            // 1. Calcul de la durée YouTube (le "poids" lourd)
+            const youtubeDuration = await getAudioDuration(song.url);
+            const apiDuration = song.apiDuration || 0;
+
+            // 2. Calcul de l'écart
+            const diff = Math.abs(youtubeDuration - apiDuration);
+            const isMatch = diff < 30; // Marge de 30 secondes
+
+            // 3. Construction du verdict
+            const embed = new EmbedBuilder()
+                .setTitle(`🔍 Rapport de vérification : ${song.title}`)
+                .setColor(isMatch ? 0x57F287 : 0xED4245)
+                .addFields(
+                    { name: '⏱️ Durée Paroles (API)', value: formatTime(apiDuration), inline: true },
+                    { name: '📺 Durée Vidéo (YouTube)', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : 'Incalculable', inline: true },
+                    { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s détecté.** Les paroles risquent d'être décalées.` }
+                )
+                .setFooter({ text: "Si l'écart est trop grand, essaie de trouver une version 'Album' ou 'Lyrics' sur YouTube." });
+
+            return interaction.followUp({ embeds: [embed], ephemeral: true });
+        }
+
+        // --- (Garder ici ton code existant pour les Slash Commands et Modals) ---
+        if (interaction.isChatInputCommand()) {
+            const command = interaction.client.commands.get(interaction.commandName);
+            if (!command) return;
+            try { await command.execute(interaction); } catch (e) { console.error(e); }
+        }
+
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'modal_register_songs') {
+                const command = interaction.client.commands.get('inscrire');
+                if (command) await command.handleModalSubmit(interaction);
+            }
+        }
+    },
+};
+      
     // ── BOUTON SPECTATEUR (message d'annonce) ────────────────────────────────
     if (customId === 'event_spectator') {
       const guard = checkAnnouncementButton(interaction);
