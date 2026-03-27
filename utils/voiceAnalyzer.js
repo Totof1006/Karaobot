@@ -1,34 +1,46 @@
 /**
  * Analyse le flux audio pour détecter l'activité vocale (VAD simplifiée)
- * @param {AudioReceiveStream} receiverStream - Le flux audio du chanteur
- * @param {Function} onActivity - Callback appelé quand du son est détecté
  */
 function analyzeVoiceActivity(receiverStream, onActivity) {
     if (!receiverStream) return;
 
-    // Discord envoie des paquets Opus. 
-    // Pour un score de précision, on écoute les événements 'data'
-    receiverStream.on('data', (chunk) => {
-        // Un chunk vide ou très petit signifie un silence
-        if (!chunk || chunk.length < 10) return;
+    let packetCount = 0;
 
-        // On calcule une amplitude très basique du paquet Opus
-        // Plus la valeur est haute, plus le chanteur chante fort
+    receiverStream.on('data', (chunk) => {
+        // Ignorer les paquets de silence ou trop petits (Discord envoie parfois des paquets de 3 octets)
+        if (!chunk || chunk.length < 20) return;
+
+        // Calcul de l'énergie moyenne du paquet compressé
         let sum = 0;
         for (let i = 0; i < chunk.length; i++) {
-            sum += Math.abs(chunk[i]);
+            sum += chunk[i];
         }
-        const averageEnergy = sum / chunk.length;
+        
+        // Moyenne d'énergie (valeur absolue)
+        const averageEnergy = Math.abs(sum / chunk.length);
 
-        // Seuil de détection (à ajuster selon les tests)
-        // Si l'énergie dépasse 10, on considère que l'utilisateur chante
-        if (averageEnergy > 10) {
+        // SEUIL DE DÉTECTION (Ajustable)
+        // Sur Opus, un silence se situe souvent en dessous de 5-8.
+        // Si > 12, c'est presque certainement une voix ou un souffle proche du micro.
+        if (averageEnergy > 12) {
             onActivity(averageEnergy);
+        }
+        
+        // Log de debug optionnel (à commenter en production)
+        packetCount++;
+        if (packetCount % 500 === 0) {
+            console.log(`[Analyzer] Flux actif, énergie moyenne : ${averageEnergy.toFixed(2)}`);
         }
     });
 
     receiverStream.on('error', (err) => {
-        console.error("[Analyzer] Erreur flux audio:", err);
+        // Évite le crash du bot si le flux se coupe brutalement
+        console.error("[Analyzer] Flux audio interrompu :", err.message);
+    });
+
+    // Nettoyage automatique à la fin du flux
+    receiverStream.on('end', () => {
+        console.log("[Analyzer] Fin de l'analyse pour ce chanteur.");
     });
 }
 
