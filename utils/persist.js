@@ -1,7 +1,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '../data/session_persist.json');
+const PERSIST_PATH = '/data/persist.json';
 
 function load() {
   if (!fs.existsSync(DB_PATH)) {
