@@ -3,7 +3,13 @@ const {
     TextInputBuilder, TextInputStyle, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle 
 } = require('discord.js');
-const { getEvent, registerPlayer, setPlayerSongs } = require('../utils/eventDB');
+
+// IMPORT MIS À JOUR POUR COHÉRENCE TOTALE
+const { 
+    getEvent, registerPlayer, unregisterPlayer, 
+    setPlayerSongs, isRegistrationOpen, formatDate 
+} = require('../utils/eventDB');
+
 const { errorEmbed } = require('../utils/embeds');
 const { checkCommandChannel } = require('../utils/channelGuard');
 const { MAX_SINGERS } = require('../utils/constants');
@@ -27,7 +33,9 @@ async function refreshAnnouncement(interaction, guildId) {
             .spliceFields(3, 1, { name: `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`, value: playerList });
 
         await msg.edit({ embeds: [updatedEmbed] });
-    } catch (e) { console.error('Erreur refresh:', e.message); }
+    } catch (e) { 
+        console.error('Erreur refresh:', e.message); 
+    }
 }
 
 async function showRegistrationModal(interaction) {
@@ -83,7 +91,7 @@ async function handleModalSubmit(interaction) {
         return { title, artist, url };
     }).filter(s => s !== null);
 
-    // Étape 3 : Recherche rapide des paroles (Sans calcul de temps YouTube)
+    // Étape 3 : Recherche rapide des paroles
     const validationResults = await Promise.all(songs.map(async (s) => {
         try {
             const query = encodeURIComponent(`${s.title} ${s.artist}`);
@@ -104,24 +112,27 @@ async function handleModalSubmit(interaction) {
         }
     }));
 
-    // Étape 4 : Mise à jour des données (On inclut apiDuration pour le bouton futur)
+    // Étape 4 : Mise à jour des données
     const finalSongs = songs.map((s, i) => ({
         ...s,
         apiDuration: validationResults[i].apiDuration,
         verified: false
     }));
 
+    // Inscription si nécessaire
     if (!event.registrations.find(r => r.userId === interaction.user.id)) {
         registerPlayer(guildId, interaction.user.id, interaction.user.username);
     }
+    
+    // Sauvegarde des chansons (avec apiDuration)
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
     await refreshAnnouncement(interaction, guildId);
 
-    // Étape 5 : Construction de la réponse avec boutons de vérification
+    // Étape 5 : Réponse avec boutons
     const embed = new EmbedBuilder()
         .setTitle('🎤 Inscription Enregistrée !')
         .setColor(0x57F287)
-        .setDescription("Tes chansons ont été ajoutées. Clique sur les boutons ci-dessous pour vérifier si la durée de ta vidéo correspond aux paroles trouvées.")
+        .setDescription("Tes chansons ont été ajoutées. Clique sur les boutons ci-dessous pour vérifier la correspondance avec YouTube.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
             value: `**${s.title}** (${s.artist})\nParoles : ${validationResults[i].hasLyrics ? '✅ Trouvées' : '❌ Non trouvées'}`,
