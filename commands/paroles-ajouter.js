@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const ytdl = require('@distube/ytdl-core'); // Utilisation de ytdl-core à la place de ffmpeg
+const ytdl = require('@distube/ytdl-core'); 
 const { ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
 const { slugify } = require('../utils/lyricsSync');
 const { errorEmbed } = require('../utils/embeds');
@@ -10,14 +10,21 @@ const { getSession } = require('../utils/gameState');
 
 const LYRICS_DIR = path.join(__dirname, '../lyrics');
 
-// --- FONCTION UTILITAIRE SÉCURISÉE ---
+// --- FONCTION UTILITAIRE SÉCURISÉE (SIMULATION NAVIGATEUR) ---
 async function getAudioDuration(url) {
     if (!url || !ytdl.validateURL(url)) return 0;
     try {
-        const info = await ytdl.getBasicInfo(url);
+        // Ajout du header pour éviter le blocage YouTube 429/410 vu dans les logs
+        const info = await ytdl.getBasicInfo(url, {
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                }
+            }
+        });
         return parseInt(info.videoDetails.lengthSeconds) || 0;
     } catch (e) {
-        console.error("[paroles-ajouter] Erreur durée:", e.message);
+        console.error("[paroles-ajouter] Erreur durée YouTube:", e.message);
         return 0;
     }
 }
@@ -48,7 +55,7 @@ module.exports = {
 
         await interaction.deferReply({ ephemeral: true });
 
-        // 1. Récupération de la durée de la musique pour filtrage
+        // 1. Récupération de la durée de la musique en cours
         const session = getSession(interaction.guildId);
         let currentAudioDuration = 0;
         if (session?.currentSong?.url) {
@@ -88,17 +95,17 @@ module.exports = {
             });
         }
 
-        // 3. Vérification de l'écart de durée
+        // 3. Vérification de l'écart de durée (Sécurité Scoring)
         if (currentAudioDuration > 0 && data.duration) {
             const diff = Math.abs(data.duration - currentAudioDuration);
-            if (diff > 20) { // Marge de 20s pour tolérer les intros
+            if (diff > 25) { // Tolérance de 25s pour les intros YouTube
                 return interaction.editReply({
-                    embeds: [errorEmbed(`⚠️ **Écart trop important !**\nMusique : ${currentAudioDuration}s | Paroles : ${Math.round(data.duration)}s`)],
+                    embeds: [errorEmbed(`⚠️ **Écart trop important !**\n\nYouTube : ${currentAudioDuration}s\nParoles : ${Math.round(data.duration)}s\n\nCherche une version plus proche.`)],
                 });
             }
         }
 
-        // 4. Préparation et Sauvegarde
+        // 4. Préparation et Sauvegarde du fichier .lrc
         const lrcContent = data.syncedLyrics || data.plainLyrics;
         if (!lrcContent) return interaction.editReply({ embeds: [errorEmbed(`Paroles vides.`)] });
 
@@ -110,7 +117,7 @@ module.exports = {
         const lrcHeader = [
             `[ti:${data.trackName || titre}]`,
             `[ar:${data.artistName || artiste}]`,
-            data.duration ? `[length:${Math.floor(data.duration / 60)}:${String(Math.floor(data.duration % 60)).padStart(2, '0')}]` : '',
+            data.duration ? `[length:${formatTime(data.duration)}]` : '',
             '',
         ].join('\n');
 
@@ -124,7 +131,7 @@ module.exports = {
             embeds: [
                 new EmbedBuilder()
                     .setColor(0x57F287)
-                    .setTitle('✅ Paroles ajoutées !')
+                    .setTitle('✅ Paroles synchronisées !')
                     .addFields(
                         { name: '🎵 Titre', value: data.trackName || titre, inline: true },
                         { name: '⏱️ Durée', value: formatTime(data.duration), inline: true }
