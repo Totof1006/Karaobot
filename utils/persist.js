@@ -1,12 +1,17 @@
 const fs   = require('fs');
 const path = require('path');
 
-const PERSIST_PATH = '/data/persist.json';
+// Utilise le même nom partout
+const DB_PATH = '/data/persist.json'; 
 
 function load() {
+  // Maintenant DB_PATH est bien défini juste au-dessus
   if (!fs.existsSync(DB_PATH)) {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFileSync(DB_PATH, JSON.stringify({ lastSessions: {}, voiceChannels: {}, rematchCount: {} }));
+    // Crée le dossier /data s'il n'existe pas (utile pour le premier lancement)
+    if (!fs.existsSync(path.dirname(DB_PATH))) {
+      fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    }
+    fs.writeFileSync(DB_PATH, JSON.stringify({ lastSessions: {}, voiceChannels: {}, rematchCount: {}, nightResults: {} }));
   }
   try {
     const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
