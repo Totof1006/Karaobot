@@ -31,17 +31,27 @@ async function findVoiceChannel(guild) {
 async function muteAllExcept(guild, voiceChannel, activeSingerId) {
   if (!voiceChannel) return;
 
+  // Vérification de la permission du bot
+  const botMember = guild.members.me;
+  if (!botMember.permissionsIn(voiceChannel).has(PermissionsBitField.Flags.MuteMembers)) {
+    console.error(`[Vocal] Erreur: Le bot n'a pas la permission 'MuteMembers' dans #${voiceChannel.name}`);
+    return;
+  }
+
   const ops = [];
   for (const [memberId, member] of voiceChannel.members) {
     if (member.user.bot) continue;
-    if (memberId === activeSingerId) {
-      ops.push(member.voice.setMute(false, 'Tour de chant karaoké').catch(e => console.warn(`[Vocal] Démute ${memberId}:`, e.message)));
-    } else {
-      ops.push(member.voice.setMute(true, 'Karaoké : ce n\'est pas ton tour').catch(e => console.warn(`[Vocal] Mute ${memberId}:`, e.message)));
+    
+    // On ne tente l'action que si l'état actuel est différent (évite du spam API)
+    const shouldBeMuted = memberId !== activeSingerId;
+    if (member.voice.serverMute !== shouldBeMuted) {
+      ops.push(
+        member.voice.setMute(shouldBeMuted, shouldBeMuted ? 'Karaoké : micro coupé' : 'Tour de chant')
+          .catch(e => console.warn(`[Vocal] Erreur Mute/Unmute ${memberId}:`, e.message))
+      );
     }
   }
   await Promise.all(ops);
-  console.log(`[Vocal] Seul <${activeSingerId}> est démuté dans #${voiceChannel.name}`);
 }
 
 // ─── Démutera tout le monde (fin de session ou pause) ────────────────────────
