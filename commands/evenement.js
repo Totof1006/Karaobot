@@ -1,11 +1,11 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType,
         EmbedBuilder, GuildScheduledEventEntityType,
-        GuildScheduledEventPrivacyLevel }              = require('discord.js');
+        GuildScheduledEventPrivacyLevel }                         = require('discord.js');
 const { getEvent, createEvent, saveEvent, formatDate }            = require('../utils/eventDB');
-const { errorEmbed }                                   = require('../utils/embeds');
-const { eventRegistrationButtons }                     = require('../utils/buttons');
-const { loadVoiceChannel }                             = require('../utils/persist');
-const { MAX_SINGERS }                                  = require('../utils/constants');
+const { errorEmbed }                                              = require('../utils/embeds');
+const { eventRegistrationButtons }                                = require('../utils/buttons');
+const { loadVoiceChannel }                                        = require('../utils/persist');
+const { MAX_SINGERS }                                             = require('../utils/constants');
 
 module.exports = {
   data: new SlashCommandBuilder()
