@@ -7,15 +7,27 @@ const LYRICS_DIR = path.join(__dirname, '../lyrics');
 
 function parseLRC(content) {
   const lines = [];
-  const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+  // Cette RegEx est plus stricte sur le format [mm:ss.xx]
+  const regex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+  
   for (const rawLine of content.split('\n')) {
-    const match = rawLine.trim().match(regex);
-    if (!match) continue;
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+
+    const match = trimmed.match(regex);
+    if (!match) continue; // Ignore les [ti:...] [ar:...] etc.
+
     const minutes = parseInt(match[1]);
     const seconds = parseInt(match[2]);
-    const ms = match[3].length === 2 ? parseInt(match[3]) * 10 : parseInt(match[3]);
+    // Gestion propre des centièmes vs millièmes
+    const msStr = match[3];
+    const ms = msStr.length === 2 ? parseInt(msStr) * 10 : parseInt(msStr);
+    
     const text = match[4].trim();
-    lines.push({ timeMs: minutes * 60_000 + seconds * 1_000 + ms, text });
+    // On n'ajoute la ligne que s'il y a du texte (évite les lignes vides de synchro)
+    if (text) {
+      lines.push({ timeMs: minutes * 60_000 + seconds * 1_000 + ms, text });
+    }
   }
   return lines.sort((a, b) => a.timeMs - b.timeMs);
 }
