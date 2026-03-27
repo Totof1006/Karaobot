@@ -1,8 +1,8 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DB_PATH      = path.join(__dirname, '../data/scores.json');
-const HISTORY_PATH = path.join(__dirname, '../data/history.json');
+const DB_PATH = '/data/scores.json';
+const HISTORY_PATH = '/data/history.json';
 
 function loadDB() {
   if (!fs.existsSync(DB_PATH)) {
