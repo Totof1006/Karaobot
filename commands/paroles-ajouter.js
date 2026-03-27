@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const ytdl = require('ytdl-core'); // Utilisation de ytdl-core à la place de ffmpeg
+const ytdl = require('@distube/ytdl-core'); // Utilisation de ytdl-core à la place de ffmpeg
 const { ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
 const { slugify } = require('../utils/lyricsSync');
 const { errorEmbed } = require('../utils/embeds');
