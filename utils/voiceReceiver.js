@@ -9,15 +9,23 @@ const { EndBehaviorType } = require('@discordjs/voice');
 function setupUserReceiver(connection, userId) {
     if (!connection) return null;
 
-    // On s'abonne au flux audio de l'utilisateur
-    // On utilise Opus car c'est le format natif de Discord (plus léger)
-    const receiver = connection.receiver.subscribe(userId, {
-        end: {
-            behavior: EndBehaviorType.Manual, // On gère nous-même l'arrêt (fin de chanson)
-        },
-    });
+    try {
+        const receiver = connection.receiver.subscribe(userId, {
+            mode: 'opus', // Précise le mode explicitement
+            end: {
+                behavior: EndBehaviorType.Manual,
+            },
+        });
 
-    console.log(`[Audio] Écoute activée pour l'utilisateur : ${userId}`);
-    
-    return receiver;
+        // Gestion d'erreur sur le flux
+        receiver.on('error', (err) => {
+            console.error(`[Audio Receiver] Erreur flux pour ${userId}:`, err.message);
+        });
+
+        console.log(`[Audio] Écoute activée pour l'utilisateur : ${userId}`);
+        return receiver;
+    } catch (error) {
+        console.error(`[Audio Receiver] Échec de l'abonnement pour ${userId}:`, error.message);
+        return null;
+    }
 }
