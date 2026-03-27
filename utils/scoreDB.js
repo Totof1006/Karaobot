@@ -68,8 +68,15 @@ function updateGlobalScores(guildId, players) {
     if (player.score > entry.bestScore) entry.bestScore = player.score;
   }
 
+  // ── Mise à jour du gagnant ──
   const sorted = [...players].sort((a, b) => b.score - a.score);
-  if (sorted.length > 0) db[guildId][sorted[0].userId].wins++;
+  
+  if (sorted.length > 0 && sorted[0].score > 0) { // On ne gagne que si on a des points
+    const winnerEntry = db[guildId][sorted[0].userId];
+    if (winnerEntry) {
+        winnerEntry.wins = (winnerEntry.wins || 0) + 1;
+    }
+  }
 
   saveDB(db);
 
