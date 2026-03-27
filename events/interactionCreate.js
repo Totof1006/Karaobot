@@ -101,7 +101,8 @@ module.exports = {
         try {
             // ── BOUTON VÉRIFICATION DE VERSION ─────────────────
             if (customId.startsWith('verify_song_')) {
-                await interaction.deferReply({ ephemeral: true }); // Changé pour éviter le bug de deferUpdate
+                // 1. On dit TOUT DE SUITE à Discord de patienter
+                await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
                 const songIndex = parseInt(customId.split('_')[2]);
                 const event = getEvent(interaction.guildId);
@@ -109,25 +110,32 @@ module.exports = {
                 const song = registration?.songs[songIndex];
 
                 if (!song || !song.url) {
-                    return interaction.editReply({ content: "❌ Données introuvables." });
+                    return interaction.editReply({ content: "❌ Données de chanson introuvables." });
                 }
 
-                const youtubeDuration = await getAudioDuration(song.url);
-                const apiDuration = song.apiDuration || 0;
-                const diff = Math.abs(youtubeDuration - apiDuration);
-                const isMatch = youtubeDuration > 0 && diff < 30;
+                try {
+                    // 2. On lance le calcul (qui peut prendre du temps)
+                    const youtubeDuration = await getAudioDuration(song.url);
+                    const apiDuration = song.apiDuration || 0;
+                    const diff = Math.abs(youtubeDuration - apiDuration);
+                    const isMatch = youtubeDuration > 0 && diff < 30;
 
-                const embed = new EmbedBuilder()
-                    .setTitle(`🔍 Rapport : ${song.title}`)
-                    .setColor(isMatch ? 0x57F287 : 0xED4245)
-                    .addFields(
-                        { name: '⏱️ Paroles (API)', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart détecté.**` }
-                    )
-                    .setFooter({ text: "Vérifie que ta vidéo ne contient pas d'intro trop longue." });
+                    const embed = new EmbedBuilder()
+                        .setTitle(`🔍 Rapport : ${song.title}`)
+                        .setColor(isMatch ? 0x57F287 : 0xED4245)
+                        .addFields(
+                            { name: '⏱️ Paroles (API)', value: formatTime(apiDuration), inline: true },
+                            { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true },
+                            { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart détecté.**` }
+                        )
+                        .setFooter({ text: "Vérifie que ta vidéo ne contient pas d'intro trop longue." });
 
-                return interaction.editReply({ embeds: [embed] });
+                    // 3. On envoie le résultat
+                    return await interaction.editReply({ embeds: [embed] });
+                } catch (error) {
+                    console.error("Erreur durant la vérification:", error);
+                    return await interaction.editReply({ content: "⚠️ Erreur lors du calcul de la durée." });
+                }
             }
 
             // ── BOUTON S'INSCRIRE ────────────────────────────────────────────────────
