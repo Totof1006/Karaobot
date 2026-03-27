@@ -2,7 +2,7 @@ const fs   = require('fs');
 const path = require('path');
 const { MAX_SINGERS } = require('./constants');
 
-const DB_PATH = path.join(__dirname, '../data/events.json');
+const DB_PATH = '/data/events.json';
 
 // ─── LECTURE / ÉCRITURE ───────────────────────────────────────────────────────
 
