@@ -1,17 +1,17 @@
-const { startScheduler }        = require('../utils/scheduler');
-const { loadVoiceChannel }      = require('../utils/persist');
-const { ChannelType }           = require('discord.js');
+const { ActivityType, ChannelType, Events } = require('discord.js'); // Ajout de Events
+const { startScheduler } = require('../utils/scheduler');
+const { loadVoiceChannel } = require('../utils/persist');
 
 module.exports = {
-  name: 'ready',
+  name: Events.ClientReady, // Utilise la constante officielle
   once: true,
   async execute(client) {
     console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
-    client.user.setActivity('🎤 Karaobot', { type: 2 });
+    
+    // Définir l'activité correctement
+    client.user.setActivity('🎤 Karaobot', { type: ActivityType.Listening });
 
-    // ── Démuter tous les membres mutés dans les salons vocaux connus ──────────
-    // Protection contre les mutes persistants si le bot a redémarré pendant
-    // une session active (la session RAM est perdue mais les mutes Discord restent)
+    // ── Démuter tous les membres ──────────────────────────────────────────
     try {
       for (const guild of client.guilds.cache.values()) {
         const savedId = loadVoiceChannel(guild.id);
