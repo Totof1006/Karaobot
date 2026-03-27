@@ -1,94 +1,38 @@
-const { EmbedBuilder }           = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 const {
-  getSession, addPlayer, getCurrentSinger,
-  getSongTitle,
-  addVote, advanceToNextSinger,
-  deleteSession, shufflePlayers,
+    getSession, addPlayer, getCurrentSinger,
+    getSongTitle,
+    addVote, advanceToNextSinger,
+    deleteSession, shufflePlayers,
 } = require('../utils/gameState');
 const {
-  registrationEmbed, votingEmbed, errorEmbed, successEmbed,
+    registrationEmbed, votingEmbed, errorEmbed, successEmbed,
 } = require('../utils/embeds');
 const { joinButton, startButton, voteButtons } = require('../utils/buttons');
-const { getEvent, registerPlayer, unregisterPlayer, isRegistrationOpen } = require('../utils/eventDB');
-const { refreshAnnouncement,
-        showRegistrationModal, handleModalSubmit } = require('../commands/inscrire');
+
+// IMPORT CORRIGÉ : Ajout de formatDate et setPlayerSongs
+const { 
+    getEvent, registerPlayer, unregisterPlayer, 
+    isRegistrationOpen, formatDate, setPlayerSongs 
+} = require('../utils/eventDB');
+
+const { refreshAnnouncement, showRegistrationModal, handleModalSubmit } = require('../commands/inscrire');
 const {
-  assignSpectatorRole, removeKaraokeRoles,
-  ROLE_LEADER, ROLE_MODO, hasRole,
+    assignSpectatorRole, removeKaraokeRoles,
+    ROLE_LEADER, ROLE_MODO, hasRole,
 } = require('../utils/roleManager');
 const {
-  findVoiceChannel, unmuteSingersOnly,
+    findVoiceChannel, unmuteSingersOnly,
 } = require('../utils/voiceManager');
 const { checkAnnouncementButton, checkCommandChannel } = require('../utils/channelGuard');
-const { launchFromEvent }                        = require('../commands/lancer-evenement');
-const { playLocalAudio }                         = require('../utils/audioPlayer');
-const { startBreakThenSing, revealResults,
-        endSession }                             = require('../utils/sessionFlow');
-const { updateProgressEmbed }                    = require('../utils/progressEmbed');
-
+const { launchFromEvent } = require('../commands/lancer-evenement');
+const { playLocalAudio } = require('../utils/audioPlayer');
+const { startBreakThenSing, revealResults, endSession } = require('../utils/sessionFlow');
+const { updateProgressEmbed } = require('../utils/progressEmbed');
 const { VOTE_DURATION_MS, APPLAUSE_FILE, MAX_SINGERS } = require('../utils/constants');
 
-module.exports = {
-  name: 'interactionCreate',
-  async execute(interaction, client) {
+// --- FONCTIONS UTILITAIRES POUR LA VÉRIFICATION ---
 
-    // ── Slash commands ──────────────────────────────────────────────────────
-    if (interaction.isChatInputCommand()) {
-      const command = client.commands.get(interaction.commandName);
-      if (!command) return;
-      try {
-        await command.execute(interaction);
-      } catch (err) {
-        console.error(err);
-        const msg = { embeds: [errorEmbed('Une erreur est survenue.')], ephemeral: true };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
-        else await interaction.reply(msg);
-      }
-      return;
-    }
-
-    // ── Modals ──────────────────────────────────────────────────────────────
-    if (interaction.isModalSubmit()) {
-      try {
-        if (interaction.customId === 'modal_register_songs') {
-          const guard = checkCommandChannel(interaction);
-          if (!guard.ok) {
-            return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-          }
-          await handleModalSubmit(interaction);
-        }
-      } catch (err) {
-        console.error('[Modal]', err);
-        const msg = { embeds: [errorEmbed('Une erreur est survenue lors du traitement du formulaire.')], ephemeral: true };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
-        else await interaction.reply(msg).catch(() => {});
-      }
-      return;
-    }
-
-    // ── Buttons ─────────────────────────────────────────────────────────────
-    if (!interaction.isButton()) return;
-
-    const session = getSession(interaction.guildId);
-    const { customId, user } = interaction;
-
-    try {
-
-    // ── BOUTON S'INSCRIRE chanteur → ouvre le modal ──────────────────────────
-    if (customId === 'event_register') {
-      const guard = checkAnnouncementButton(interaction);
-      if (!guard.ok) {
-        return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-      }
-      await showRegistrationModal(interaction);
-      return;
-    }
-
-    // ── BOUTON verification → lance FFmpeg ───────────────────────────────────
-const { EmbedBuilder } = require('discord.js');
-const { getEvent } = require('../utils/eventDB');
-
-// Fonction utilitaire pour obtenir la durée YouTube via FFmpeg
 async function getAudioDuration(url) {
     const ffmpeg = require('fluent-ffmpeg');
     return new Promise((resolve) => {
@@ -101,340 +45,265 @@ async function getAudioDuration(url) {
     });
 }
 
-// Fonction pour transformer des secondes en 0:00
 const formatTime = (s) => {
     const min = Math.floor(s / 60);
     const sec = Math.round(s % 60);
     return `${min}:${sec < 10 ? '0' : ''}${sec}`;
 };
 
+// --- MODULE PRINCIPAL ---
+
 module.exports = {
     name: 'interactionCreate',
-    async execute(interaction) {
-        // --- GESTION DES BOUTONS DE VÉRIFICATION ---
-        if (interaction.isButton() && interaction.customId.startsWith('verify_song_')) {
-            await interaction.deferUpdate(); // On prévient Discord qu'on traite le clic
+    async execute(interaction, client) {
 
-            const songIndex = parseInt(interaction.customId.split('_')[2]);
-            const event = getEvent(interaction.guildId);
-            const registration = event?.registrations.find(r => r.userId === interaction.user.id);
-            const song = registration?.songs[songIndex];
-
-            if (!song || !song.url) {
-                return interaction.followUp({ content: "❌ Impossible de retrouver les données de cette chanson.", ephemeral: true });
-            }
-
-            // 1. Calcul de la durée YouTube (le "poids" lourd)
-            const youtubeDuration = await getAudioDuration(song.url);
-            const apiDuration = song.apiDuration || 0;
-
-            // 2. Calcul de l'écart
-            const diff = Math.abs(youtubeDuration - apiDuration);
-            const isMatch = diff < 30; // Marge de 30 secondes
-
-            // 3. Construction du verdict
-            const embed = new EmbedBuilder()
-                .setTitle(`🔍 Rapport de vérification : ${song.title}`)
-                .setColor(isMatch ? 0x57F287 : 0xED4245)
-                .addFields(
-                    { name: '⏱️ Durée Paroles (API)', value: formatTime(apiDuration), inline: true },
-                    { name: '📺 Durée Vidéo (YouTube)', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : 'Incalculable', inline: true },
-                    { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s détecté.** Les paroles risquent d'être décalées.` }
-                )
-                .setFooter({ text: "Si l'écart est trop grand, essaie de trouver une version 'Album' ou 'Lyrics' sur YouTube." });
-
-            return interaction.followUp({ embeds: [embed], ephemeral: true });
-        }
-
-        // --- (Garder ici ton code existant pour les Slash Commands et Modals) ---
+        // ── Slash commands ──────────────────────────────────────────────────────
         if (interaction.isChatInputCommand()) {
-            const command = interaction.client.commands.get(interaction.commandName);
+            const command = client.commands.get(interaction.commandName);
             if (!command) return;
-            try { await command.execute(interaction); } catch (e) { console.error(e); }
+            try {
+                await command.execute(interaction);
+            } catch (err) {
+                console.error(err);
+                const msg = { embeds: [errorEmbed('Une erreur est survenue.')], ephemeral: true };
+                if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
+                else await interaction.reply(msg);
+            }
+            return;
         }
 
+        // ── Modals ──────────────────────────────────────────────────────────────
         if (interaction.isModalSubmit()) {
-            if (interaction.customId === 'modal_register_songs') {
-                const command = interaction.client.commands.get('inscrire');
-                if (command) await command.handleModalSubmit(interaction);
+            try {
+                if (interaction.customId === 'modal_register_songs') {
+                    const guard = checkCommandChannel(interaction);
+                    if (!guard.ok) {
+                        return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+                    }
+                    await handleModalSubmit(interaction);
+                }
+            } catch (err) {
+                console.error('[Modal]', err);
+                const msg = { embeds: [errorEmbed('Une erreur est survenue lors du traitement du formulaire.')], ephemeral: true };
+                if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => { });
+                else await interaction.reply(msg).catch(() => { });
             }
+            return;
+        }
+
+        // ── Buttons ─────────────────────────────────────────────────────────────
+        if (!interaction.isButton()) return;
+
+        const session = getSession(interaction.guildId);
+        const { customId, user } = interaction;
+
+        try {
+            // ── BOUTON VÉRIFICATION DE VERSION (Nouveau système) ─────────────────
+            if (customId.startsWith('verify_song_')) {
+                await interaction.deferUpdate();
+
+                const songIndex = parseInt(customId.split('_')[2]);
+                const event = getEvent(interaction.guildId);
+                const registration = event?.registrations.find(r => r.userId === user.id);
+                const song = registration?.songs[songIndex];
+
+                if (!song || !song.url) {
+                    return interaction.followUp({ content: "❌ Impossible de retrouver les données de cette chanson.", ephemeral: true });
+                }
+
+                const youtubeDuration = await getAudioDuration(song.url);
+                const apiDuration = song.apiDuration || 0;
+                const diff = Math.abs(youtubeDuration - apiDuration);
+                const isMatch = diff < 30;
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`🔍 Rapport : ${song.title}`)
+                    .setColor(isMatch ? 0x57F287 : 0xED4245)
+                    .addFields(
+                        { name: '⏱️ Paroles (API)', value: formatTime(apiDuration), inline: true },
+                        { name: '📺 Vidéo (YouTube)', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : 'Incalculable', inline: true },
+                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s détecté.**` }
+                    )
+                    .setFooter({ text: "Vérifie que ta vidéo ne contient pas d'intro trop longue." });
+
+                return interaction.followUp({ embeds: [embed], ephemeral: true });
+            }
+
+            // ── BOUTON S'INSCRIRE chanteur → ouvre le modal ──────────────────────────
+            if (customId === 'event_register') {
+                const guard = checkAnnouncementButton(interaction);
+                if (!guard.ok) {
+                    return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+                }
+                await showRegistrationModal(interaction);
+                return;
+            }
+
+            // ── BOUTON SPECTATEUR (message d'annonce) ────────────────────────────────
+            if (customId === 'event_spectator') {
+                const guard = checkAnnouncementButton(interaction);
+                if (!guard.ok) {
+                    return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+                }
+                const event = getEvent(interaction.guildId);
+                if (!event) {
+                    return interaction.reply({ embeds: [errorEmbed('Aucun événement en cours.')], ephemeral: true });
+                }
+                const isRegistered = event.registrations.find(r => r.userId === user.id);
+                if (isRegistered) {
+                    return interaction.reply({
+                        embeds: [errorEmbed('Tu es déjà inscrit(e) comme **chanteur** !')],
+                        ephemeral: true,
+                    });
+                }
+                await assignSpectatorRole(interaction.guild, user.id);
+                return interaction.reply({
+                    embeds: [successEmbed(`Tu as rejoint **${event.title}** en tant que 👁️ **spectateur** !`)],
+                    ephemeral: true,
+                });
+            }
+
+            // ── BOUTON SE DÉSINSCRIRE (message d'annonce) ────────────────────────────
+            if (customId === 'event_unregister') {
+                const guard = checkAnnouncementButton(interaction);
+                if (!guard.ok) {
+                    return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+                }
+                const event = getEvent(interaction.guildId);
+                if (!event || !isRegistrationOpen(event)) {
+                    return interaction.reply({ embeds: [errorEmbed('Désinscription impossible actuellement.')], ephemeral: true });
+                }
+                const ok = unregisterPlayer(interaction.guildId, user.id);
+                if (!ok) {
+                    return interaction.reply({ embeds: [errorEmbed('Tu n\'étais pas inscrit(e).')], ephemeral: true });
+                }
+                await removeKaraokeRoles(interaction.guild, user.id);
+                await refreshAnnouncement(interaction, interaction.guildId);
+                return interaction.reply({ embeds: [successEmbed('Désinscription réussie.')], ephemeral: true });
+            }
+
+            // ── REJOINDRE ────────────────────────────────────────────────────────────
+            if (customId === 'karaoke_join') {
+                if (!session || session.phase !== 'registration') {
+                    return interaction.reply({ embeds: [errorEmbed('Aucune session ouverte.')], ephemeral: true });
+                }
+                const ok = addPlayer(session, user.id, user.username);
+                if (!ok) return interaction.reply({ embeds: [errorEmbed('Inscription impossible.')], ephemeral: true });
+                await interaction.update({
+                    embeds: [registrationEmbed(session)],
+                    components: [joinButton(), startButton()],
+                });
+                return;
+            }
+
+            // ── LANCER ÉVÉNEMENT ─────────────────────────────────────────────────────
+            if (customId === 'force_launch_event') {
+                const isLeader = hasRole(interaction.member, ROLE_LEADER);
+                const isModo = hasRole(interaction.member, ROLE_MODO);
+                if (!isLeader && !isModo) return interaction.reply({ embeds: [errorEmbed('Accès refusé.')], ephemeral: true });
+                const ev = getEvent(interaction.guildId);
+                if (!ev) return interaction.reply({ embeds: [errorEmbed('Événement introuvable.')], ephemeral: true });
+                await interaction.update({ components: [] });
+                await launchFromEvent(interaction, ev);
+                return;
+            }
+
+            // ── ANNULER ──────────────────────────────────────────────────────────────
+            if (customId === 'karaoke_cancel') {
+                const isLeader = hasRole(interaction.member, ROLE_LEADER);
+                const isModo = hasRole(interaction.member, ROLE_MODO);
+                if (!session || (!isLeader && !isModo && session.hostId !== user.id)) {
+                    return interaction.reply({ embeds: [errorEmbed('Accès refusé.')], ephemeral: true });
+                }
+                deleteSession(interaction.guildId);
+                await interaction.update({ embeds: [errorEmbed('Session annulée.')], components: [] });
+                return;
+            }
+
+            // ── LANCER ───────────────────────────────────────────────────────────────
+            if (customId === 'karaoke_start') {
+                if (!session || session.hostId !== user.id) return interaction.reply({ embeds: [errorEmbed('Seul l\'hôte peut lancer.')], ephemeral: true });
+                if (session.players.length < 2) return interaction.reply({ embeds: [errorEmbed('Il faut 2 joueurs min.')], ephemeral: true });
+                session.phase = 'singing';
+                if (!session.isRematch) shufflePlayers(session);
+                await startBreakThenSing(interaction, session, true);
+                return;
+            }
+
+            // ── VOTE ─────────────────────────────────────────────────────────────────
+            if (customId.startsWith('vote_')) {
+                if (!session || session.phase !== 'voting') return interaction.reply({ embeds: [errorEmbed('Aucun vote.')], ephemeral: true });
+                if (session.votes.has(user.id)) return interaction.reply({ embeds: [errorEmbed('Déjà voté !')], ephemeral: true });
+                if (getCurrentSinger(session)?.userId === user.id) return interaction.reply({ embeds: [errorEmbed('Vote impossible pour soi.')], ephemeral: true });
+
+                const value = parseInt(customId.split('_')[1]);
+                addVote(session, user.id, value);
+                await interaction.reply({ embeds: [successEmbed(`Vote : **${value} ⭐**`)], ephemeral: true });
+                await updateProgressEmbed(session, interaction.guild);
+
+                const eligibleVoters = session.players.filter(p => p.userId !== getCurrentSinger(session)?.userId).length;
+                if (session.votes.size >= eligibleVoters) {
+                    if (session.voteTimerHandle) clearTimeout(session.voteTimerHandle);
+                    session.phase = 'results';
+                    await revealResults({ channel: interaction.channel, guild: interaction.guild }, session);
+                }
+                return;
+            }
+
+            // ── FIN DE CHANSON ───────────────────────────────────────────────────────
+            if (customId === 'karaoke_end_song') {
+                if (!session || session.hostId !== user.id || session.phase !== 'singing') return interaction.reply({ embeds: [errorEmbed('Action impossible.')], ephemeral: true });
+
+                const singer = getCurrentSinger(session);
+                const song = session.currentSong;
+                await interaction.update({ components: [] });
+
+                if (session.stopLyrics) session.stopLyrics();
+                if (session.stopAudio) session.stopAudio();
+                if (session.stopAmbient) session.stopAmbient();
+
+                session.phase = 'voting';
+                const voteMsg = await interaction.channel.send({
+                    embeds: [votingEmbed(singer, getSongTitle(song))],
+                    components: [voteButtons()],
+                });
+                session.voteMessage = voteMsg;
+
+                const voiceChannel = await findVoiceChannel(interaction.guild);
+                if (voiceChannel) {
+                    session.stopAmbient = await playLocalAudio(voiceChannel, APPLAUSE_FILE, () => { session.stopAmbient = null; });
+                }
+
+                session.voteTimerHandle = setTimeout(async () => {
+                    if (getSession(interaction.guildId)?.phase !== 'voting') return;
+                    await revealResults({ channel: interaction.channel, guild: interaction.guild }, session);
+                }, VOTE_DURATION_MS);
+                return;
+            }
+
+            // ── SUIVANT ───────────────────────────────────────────────────────────────
+            if (customId === 'karaoke_next') {
+                if (!session || session.hostId !== user.id) return interaction.reply({ embeds: [errorEmbed('Action refusée.')], ephemeral: true });
+                await interaction.update({ components: [] });
+                const hasNext = advanceToNextSinger(session);
+                if (!hasNext) {
+                    await endSession(interaction, session);
+                } else if (session.paused) {
+                    session.phase = 'paused';
+                    const voiceChannel = await findVoiceChannel(interaction.guild);
+                    if (voiceChannel) await unmuteSingersOnly(interaction.guild, voiceChannel, session.players.map(p => p.userId));
+                    await interaction.channel.send({ embeds: [new EmbedBuilder().setColor(0xFF9900).setTitle('⏸️ Pause').setDescription('Session en pause. Les micros chanteurs sont ouverts.')] });
+                } else {
+                    await startBreakThenSing(interaction, session, false);
+                }
+                return;
+            }
+
+        } catch (err) {
+            console.error('[Button]', customId, err);
+            const msg = { embeds: [errorEmbed('Une erreur est survenue.')], ephemeral: true };
+            if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => { });
+            else await interaction.reply(msg).catch(() => { });
         }
     },
 };
-      
-    // ── BOUTON SPECTATEUR (message d'annonce) ────────────────────────────────
-    if (customId === 'event_spectator') {
-      const guard = checkAnnouncementButton(interaction);
-      if (!guard.ok) {
-        return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-      }
-      const event = getEvent(interaction.guildId);
-      if (!event) {
-        return interaction.reply({ embeds: [errorEmbed('Aucun événement en cours.')], ephemeral: true });
-      }
-      const isRegistered = event.registrations.find(r => r.userId === user.id);
-      if (isRegistered) {
-        return interaction.reply({
-          embeds: [errorEmbed('Tu es déjà inscrit(e) comme **chanteur** ! Tu peux déjà voir le salon et voter.')],
-          ephemeral: true,
-        });
-      }
-      await assignSpectatorRole(interaction.guild, user.id);
-      return interaction.reply({
-        embeds: [
-          successEmbed(
-            `Tu as rejoint **${event.title}** en tant que 👁️ **spectateur** !\n\n` +
-            `Tu peux voir le salon karaoké et **voter** pendant la session, mais pas écrire dans le chat.`
-          ),
-        ],
-        ephemeral: true,
-      });
-    }
-
-    // ── BOUTON SE DÉSINSCRIRE (message d'annonce) ────────────────────────────
-    if (customId === 'event_unregister') {
-      const guard = checkAnnouncementButton(interaction);
-      if (!guard.ok) {
-        return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
-      }
-      const event = getEvent(interaction.guildId);
-      if (!event) {
-        return interaction.reply({ embeds: [errorEmbed('Aucun événement en cours.')], ephemeral: true });
-      }
-      if (!isRegistrationOpen(event)) {
-        return interaction.reply({ embeds: [errorEmbed('Les inscriptions sont fermées, impossible de se désinscrire.')], ephemeral: true });
-      }
-      const ok = unregisterPlayer(interaction.guildId, user.id);
-      if (!ok) {
-        return interaction.reply({ embeds: [errorEmbed('Tu n\'étais pas inscrit(e).')], ephemeral: true });
-      }
-      await removeKaraokeRoles(interaction.guild, user.id);
-      await refreshAnnouncement(interaction, interaction.guildId);
-      return interaction.reply({ embeds: [successEmbed('Tu as bien été désinscrit(e). Ton rôle karaoké a été retiré.')], ephemeral: true });
-    }
-
-    // ── REJOINDRE ────────────────────────────────────────────────────────────
-    if (customId === 'karaoke_join') {
-      if (!session || session.phase !== 'registration') {
-        return interaction.reply({ embeds: [errorEmbed('Aucune session ouverte aux inscriptions.')], ephemeral: true });
-      }
-      const ok = addPlayer(session, user.id, user.username);
-      if (!ok) {
-        const msg = session.players.find(p => p.userId === user.id)
-          ? 'Tu es déjà inscrit !'
-          : `La session est complète (${MAX_SINGERS} joueurs max) !`;
-        return interaction.reply({ embeds: [errorEmbed(msg)], ephemeral: true });
-      }
-      await interaction.update({
-        embeds: [registrationEmbed(session)],
-        components: [joinButton(), startButton()],
-      });
-      return;
-    }
-
-    // ── LANCER ÉVÉNEMENT MÊME SANS CHANSONS COMPLÈTES ────────────────────────
-    if (customId === 'force_launch_event') {
-      // Vérification de rôle — seuls Leader et Modo peuvent forcer le lancement
-      const isLeader = hasRole(interaction.member, ROLE_LEADER);
-      const isModo   = hasRole(interaction.member, ROLE_MODO);
-      if (!isLeader && !isModo) {
-        return interaction.reply({ embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent lancer la session.')], ephemeral: true });
-      }
-      if (!session && !getEvent(interaction.guildId)) {
-        return interaction.reply({ embeds: [errorEmbed('Aucune session ou événement en cours.')], ephemeral: true });
-      }
-      const ev = getEvent(interaction.guildId);
-      if (!ev) return interaction.reply({ embeds: [errorEmbed('Événement introuvable.')], ephemeral: true });
-      await interaction.update({ components: [] });
-      await launchFromEvent(interaction, ev);
-      return;
-    }
-
-    // ── ANNULER ──────────────────────────────────────────────────────────────
-    if (customId === 'karaoke_cancel') {
-      const isLeader = hasRole(interaction.member, ROLE_LEADER);
-      const isModo   = hasRole(interaction.member, ROLE_MODO);
-      const isHost   = session?.hostId === user.id;
-      if (!session || (!isHost && !isLeader && !isModo)) {
-        return interaction.reply({ embeds: [errorEmbed('Seuls l\'hôte, un **Leader** ou un **Modo** peuvent annuler.')], ephemeral: true });
-      }
-      deleteSession(interaction.guildId);
-      await interaction.update({ embeds: [errorEmbed('Session annulée.')], components: [] });
-      return;
-    }
-
-    // ── LANCER ───────────────────────────────────────────────────────────────
-    if (customId === 'karaoke_start') {
-      if (!session || session.hostId !== user.id) {
-        return interaction.reply({ embeds: [errorEmbed('Seul l\'hôte peut lancer la session.')], ephemeral: true });
-      }
-      if (session.players.length < 2) {
-        return interaction.reply({ embeds: [errorEmbed('Il faut au moins **2 joueurs** pour commencer !')], ephemeral: true });
-      }
-      const notReady = session.players.filter(p => p.songs.length === 0);
-      if (notReady.length > 0) {
-        const names = notReady.map(p => `<@${p.userId}>`).join(', ');
-        return interaction.reply({ embeds: [errorEmbed(`Ces joueurs n'ont pas encore soumis leurs chansons : ${names}`)], ephemeral: true });
-      }
-
-      session.phase = 'singing';
-      // Mélanger aléatoirement l'ordre de passage
-      if (!session.isRematch) shufflePlayers(session);
-      await startBreakThenSing(interaction, session, true);
-      return;
-    }
-
-    // ── VOTE ─────────────────────────────────────────────────────────────────
-    if (customId.startsWith('vote_')) {
-      if (!session || session.phase !== 'voting') {
-        return interaction.reply({ embeds: [errorEmbed('Aucun vote en cours.')], ephemeral: true });
-      }
-
-      // Anti-spam : déjà voté ?
-      if (session.votes.has(user.id)) {
-        return interaction.reply({
-          embeds: [errorEmbed('Tu as **déjà voté** pour ce chanteur ! Un seul vote par personne.')],
-          ephemeral: true,
-        });
-      }
-
-      // Le chanteur actif ne peut pas voter pour lui-même
-      if (getCurrentSinger(session)?.userId === user.id) {
-        return interaction.reply({
-          embeds: [errorEmbed('Tu ne peux pas voter pour toi-même !')],
-          ephemeral: true,
-        });
-      }
-
-      const value = parseInt(customId.split('_')[1]);
-      addVote(session, user.id, value);
-
-      // eligibleVoters = tous les inscrits sauf le chanteur actif
-      const eligibleVoters = session.players.filter(p => p.userId !== getCurrentSinger(session)?.userId).length;
-      const received       = session.votes.size;
-
-      await interaction.reply({
-        embeds: [successEmbed(`Vote enregistré : **${value} ⭐** ! (${received} votes reçus)`)],
-        ephemeral: true,
-      });
-
-      // Mettre à jour l'embed de progression
-      await updateProgressEmbed(session, interaction.guild);
-
-      // Re-vérifier la phase après les await (protection contre double-appel concurrent)
-      if (session.phase !== 'voting') return;
-
-      // Si tous les chanteurs inscrits ont voté → clore immédiatement
-      if (received >= eligibleVoters) {
-        // Annuler le timer de vote automatique (tous votes reçus avant expiration)
-        if (session.voteTimerHandle) {
-          clearTimeout(session.voteTimerHandle);
-          session.voteTimerHandle = null;
-        }
-        session.phase = 'results'; // verrouiller avant l'await pour éviter double appel
-        await revealResults({ channel: interaction.channel, guild: interaction.guild }, session);
-      }
-      return;
-    }
-
-    // ── FIN DE CHANSON (hôte clique manuellement) ────────────────────────────
-    if (customId === 'karaoke_end_song') {
-      if (!session || session.hostId !== user.id) {
-        return interaction.reply({ embeds: [errorEmbed("Seul l'hôte peut terminer la chanson.")], ephemeral: true });
-      }
-      if (!session || session.phase !== 'singing') {
-        return interaction.reply({ embeds: [errorEmbed('Aucune chanson en cours.')], ephemeral: true });
-      }
-
-      const singer = getCurrentSinger(session);
-      const song   = session.currentSong;
-
-      if (!singer) {
-        return interaction.reply({ embeds: [errorEmbed('Aucun chanteur actif.')], ephemeral: true });
-      }
-
-      await interaction.update({ components: [] });
-
-      // Stopper l'audio, les paroles et l'ambiance
-      if (session.stopLyrics)  { session.stopLyrics();  session.stopLyrics  = null; }
-      if (session.stopAudio)   { session.stopAudio();   session.stopAudio   = null; }
-      if (session.stopAmbient) { session.stopAmbient(); session.stopAmbient = null; }
-
-      session.phase = 'voting';
-      const voteMsg = await interaction.channel.send({
-        embeds: [votingEmbed(singer, getSongTitle(song))],
-        components: [voteButtons()],
-      });
-      session.voteMessage = voteMsg;
-
-      // Jouer les applaudissements pendant le vote
-      const voiceChannel = await findVoiceChannel(interaction.guild);
-      if (voiceChannel) {
-        session.stopAmbient = await playLocalAudio(voiceChannel, APPLAUSE_FILE, () => {
-          session.stopAmbient = null;
-        });
-      }
-
-      // Auto-close votes après VOTE_DURATION_MS
-      session.voteTimerHandle = setTimeout(async () => {
-        session.voteTimerHandle = null;
-        if (getSession(interaction.guildId)?.phase !== 'voting') return;
-        await revealResults({ channel: interaction.channel, guild: interaction.guild }, session);
-      }, VOTE_DURATION_MS);
-
-      return;
-    }
-
-    // ── SUIVANT ───────────────────────────────────────────────────────────────
-    if (customId === 'karaoke_next') {
-      if (!session || session.hostId !== user.id) {
-        return interaction.reply({ embeds: [errorEmbed("Seul l'hôte peut passer au suivant.")], ephemeral: true });
-      }
-      // Acquitter immédiatement l'interaction avant les opérations longues
-      await interaction.update({ components: [] });
-      const hasNext = advanceToNextSinger(session);
-      if (!hasNext) {
-        await endSession(interaction, session);
-      } else if (session.paused) {
-        // ── PAUSE ACTIVE → bloquer la session ici ────────────────────────────
-        // interaction.update({ components: [] }) déjà fait plus haut
-        session.phase = 'paused';
-        const guild        = interaction.guild;
-        const channel      = interaction.channel;
-        const singerIds    = session.players.map(p => p.userId);
-        const voiceChannel = await findVoiceChannel(guild);
-
-        if (voiceChannel) await unmuteSingersOnly(guild, voiceChannel, singerIds);
-
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xFF9900)
-              .setTitle('⏸️ Session en pause')
-              .setDescription(
-                `La session est en pause.\n\n` +
-                `🎙️ Les micros des **chanteurs** sont **ouverts** — discutez librement !\n` +
-                `👁️ Les spectateurs restent en écoute.\n\n` +
-                `Un **Leader** ou **Modo** peut reprendre avec \`/reprise\`.`
-              ),
-          ],
-        });
-      } else {
-        await startBreakThenSing(interaction, session, false);
-      }
-      return;
-    }
-
-    } catch (err) {
-      console.error('[Button]', customId, err);
-      const msg = { embeds: [errorEmbed('Une erreur est survenue.')], ephemeral: true };
-      if (interaction.replied || interaction.deferred) await interaction.followUp(msg).catch(() => {});
-      else await interaction.reply(msg).catch(() => {});
-    }
-  },
-};
-
-// ─── Helpers délégués aux modules spécialisés ────────────────────────────────
-// startBreakThenSing, revealResults, endSession → utils/sessionFlow.js
-// buildProgressEmbed, updateProgressEmbed       → utils/progressEmbed.js
-
