@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Collection, Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const DB_PATH = '/data/scores.json';
 require('dotenv').config();
 
 // ─── 1. CONTRÔLE ANTI-CRASH (LOGS) ──────────────────────────────────────────
