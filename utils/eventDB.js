@@ -4,7 +4,7 @@ const { MAX_SINGERS } = require('./constants');
 
 const DB_PATH = path.join(__dirname, '../data/events.json');
 
-// ─── Lecture / écriture ───────────────────────────────────────────────────────
+// ─── LECTURE / ÉCRITURE ───────────────────────────────────────────────────────
 
 function loadDB() {
   if (!fs.existsSync(DB_PATH)) {
@@ -27,13 +27,12 @@ function saveDB(db) {
   fs.renameSync(tmp, DB_PATH);
 }
 
-// ─── CRUD événements ──────────────────────────────────────────────────────────
+// ─── CRUD ÉVÉNEMENTS ──────────────────────────────────────────────────────────
 
 function createEvent(guildId, opts) {
   const db = loadDB();
   if (!db[guildId]) db[guildId] = {};
 
-  // On range tout dans le tiroir .event
   db[guildId].event = {
     hostId            : opts.hostId,
     channelId         : opts.channelId, 
@@ -55,50 +54,65 @@ function createEvent(guildId, opts) {
 
 function getEvent(guildId) {
   const db = loadDB();
-  // On lit uniquement dans le tiroir .event
   return db[guildId]?.event || null;
-}
-
-function deleteEvent(guildId) {
-  const db = loadDB();
-  if (db[guildId]) {
-    // On supprime proprement UNIQUEMENT le tiroir event
-    delete db[guildId].event; 
-    saveDB(db);
-  }
 }
 
 function saveEvent(guildId, eventData) {
   const db = loadDB();
   if (!db[guildId]) db[guildId] = {};
-  
-  // TRÈS IMPORTANT : On sauvegarde dans .event pour que getEvent() le retrouve
-  db[guildId].event = eventData; 
-  
+  db[guildId].event = eventData;  
   saveDB(db);
 }
 
-// ─── Inscriptions ─────────────────────────────────────────────────────────────
+function deleteEvent(guildId) {
+  const db = loadDB();
+  if (db[guildId]) {
+    delete db[guildId].event; 
+    saveDB(db);
+  }
+}
+
+// ─── INSCRIPTIONS & CHANSONS ──────────────────────────────────────────────────
 
 function registerPlayer(guildId, userId, username) {
   const db    = loadDB();
-  const event = db[guildId]?.event; // On ajoute .event ici
+  const event = db[guildId]?.event;
   if (!event) return { ok: false, reason: 'no_event' };
 
-  const now = new Date();
-  if (now < new Date(event.registrationStart)) return { ok: false, reason: 'not_open' };
-  if (now > new Date(event.registrationEnd))   return { ok: false, reason: 'closed' };
-  if (event.registrations.length >= MAX_SINGERS)       return { ok: false, reason: 'full' };
+  // Vérification si déjà inscrit
   if (event.registrations.find(r => r.userId === userId)) return { ok: false, reason: 'already' };
+  if (event.registrations.length >= MAX_SINGERS) return { ok: false, reason: 'full' };
 
   event.registrations.push({ userId, username, songs: [] });
   saveDB(db);
   return { ok: true };
 }
 
+// CETTE FONCTION EST CELLE QUI DOIT RÉCUPÉRER apiDuration
+function setPlayerSongs(guildId, userId, songs) {
+  const db    = loadDB();
+  const event = db[guildId]?.event;
+  if (!event) return false;
+  
+  const reg = event.registrations.find(r => r.userId === userId);
+  if (!reg)  return false;
+  
+  // On mappe les chansons pour inclure apiDuration et verified
+  reg.songs = songs.map(s => ({
+    title: s.title || "Inconnu",
+    artist: s.artist || "Inconnu",
+    url: s.url || null,
+    apiDuration: s.apiDuration || 0, // CRUCIAL pour le bouton de vérification
+    verified: s.verified || false
+  }));
+  
+  saveDB(db);
+  return true;
+}
+
 function unregisterPlayer(guildId, userId) {
   const db    = loadDB();
-  const event = db[guildId]?.event; // On ajoute .event ici
+  const event = db[guildId]?.event;
   if (!event) return false;
   
   const before = event.registrations.length;
@@ -108,41 +122,13 @@ function unregisterPlayer(guildId, userId) {
   return event.registrations.length < before;
 }
 
-function setPlayerSongs(guildId, userId, songs) {
-  const db    = loadDB();
-  const event = db[guildId]?.event; // On ajoute .event ici
-  if (!event) return false;
-  
-  const reg = event.registrations.find(r => r.userId === userId);
-  if (!reg)  return false;
-  
-  reg.songs = songs.slice(0, 3);
-  saveDB(db);
-  return true;
-}
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-// ─── Helpers dates ────────────────────────────────────────────────────────────
-
-function isRegistrationOpen(event) {
-  const now = new Date();
-  return now >= new Date(event.registrationStart) && now <= new Date(event.registrationEnd);
-}
-
-function formatDate(isoString) {
-  return new Date(isoString).toLocaleString('fr-FR', {
-    weekday: 'long', day: '2-digit', month: 'long',
-    hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris',
-  });
-}
-
-// Retourne tous les guilds ayant un événement (pour le scheduler)
 function getAllEvents() {
   const db = loadDB();
   const list = [];
-  
   for (const guildId in db) {
     if (db[guildId].event) {
-      // On extrait l'événement du tiroir pour le scheduler
       list.push({ guildId, ...db[guildId].event });
     }
   }
@@ -152,5 +138,5 @@ function getAllEvents() {
 module.exports = {
   createEvent, getEvent, deleteEvent, saveEvent,
   registerPlayer, unregisterPlayer, setPlayerSongs,
-  isRegistrationOpen, formatDate, getAllEvents,
+  getAllEvents,
 };
