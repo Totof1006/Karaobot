@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const ffmpeg = require('fluent-ffmpeg'); // Nécessite ffmpeg/ffprobe sur Railway
+const ytdl = require('ytdl-core'); // Utilisation de ytdl-core à la place de ffmpeg
 const { ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
 const { slugify } = require('../utils/lyricsSync');
 const { errorEmbed } = require('../utils/embeds');
@@ -10,14 +10,16 @@ const { getSession } = require('../utils/gameState');
 
 const LYRICS_DIR = path.join(__dirname, '../lyrics');
 
-// Fonction utilitaire pour obtenir la durée de l'audio
+// --- FONCTION UTILITAIRE SÉCURISÉE ---
 async function getAudioDuration(url) {
-    return new Promise((resolve) => {
-        ffmpeg.ffprobe(url, (err, metadata) => {
-            if (err) return resolve(0);
-            resolve(metadata.format.duration);
-        });
-    });
+    if (!url || !ytdl.validateURL(url)) return 0;
+    try {
+        const info = await ytdl.getBasicInfo(url);
+        return parseInt(info.videoDetails.lengthSeconds) || 0;
+    } catch (e) {
+        console.error("[paroles-ajouter] Erreur durée:", e.message);
+        return 0;
+    }
 }
 
 module.exports = {
@@ -46,9 +48,9 @@ module.exports = {
 
         await interaction.deferReply({ ephemeral: true });
 
-        // 1. Récupération de la durée de la musique en cours pour filtrer
+        // 1. Récupération de la durée de la musique pour filtrage
         const session = getSession(interaction.guildId);
-        let currentAudioDuration = null;
+        let currentAudioDuration = 0;
         if (session?.currentSong?.url) {
             currentAudioDuration = await getAudioDuration(session.currentSong.url);
         }
@@ -62,8 +64,7 @@ module.exports = {
                 ...(album ? { album_name: album } : {}),
             });
 
-            // On ajoute la durée à la recherche si on l'a (Best Match)
-            if (currentAudioDuration) {
+            if (currentAudioDuration > 0) {
                 params.append('duration', Math.round(currentAudioDuration));
             }
 
@@ -74,52 +75,47 @@ module.exports = {
 
             if (res.status === 404) {
                 return interaction.editReply({
-                    embeds: [errorEmbed(`Aucune parole trouvée pour **${titre}**. Vérifie l'orthographe ou la durée.`)],
+                    embeds: [errorEmbed(`Aucune parole trouvée pour **${titre}**.`)],
                 });
             }
 
-            if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`);
+            if (!res.ok) throw new Error(`Erreur API (${res.status})`);
             data = await res.json();
 
         } catch (err) {
             return interaction.editReply({
-                embeds: [errorEmbed(`Erreur de connexion à lrclib : ${err.message}`)],
+                embeds: [errorEmbed(`Erreur de connexion : ${err.message}`)],
             });
         }
 
-        // 3. Vérification de l'écart de durée (Sécurité Scoring)
-        if (currentAudioDuration && data.duration) {
+        // 3. Vérification de l'écart de durée
+        if (currentAudioDuration > 0 && data.duration) {
             const diff = Math.abs(data.duration - currentAudioDuration);
-            if (diff > 15) {
+            if (diff > 20) { // Marge de 20s pour tolérer les intros
                 return interaction.editReply({
-                    embeds: [errorEmbed(`⚠️ **Écart trop important !**\n\nMusique : ${Math.round(currentAudioDuration)}s\nParoles : ${Math.round(data.duration)}s\n\nLe scoring serait faussé. Cherche une autre version.`)],
+                    embeds: [errorEmbed(`⚠️ **Écart trop important !**\nMusique : ${currentAudioDuration}s | Paroles : ${Math.round(data.duration)}s`)],
                 });
             }
         }
 
+        // 4. Préparation et Sauvegarde
         const lrcContent = data.syncedLyrics || data.plainLyrics;
-        const isSynced = !!data.syncedLyrics;
+        if (!lrcContent) return interaction.editReply({ embeds: [errorEmbed(`Paroles vides.`)] });
 
-        if (!lrcContent) {
-            return interaction.editReply({ embeds: [errorEmbed(`Paroles trouvées mais vides.`)] });
-        }
-
-        // 4. Sauvegarde du fichier
         if (!fs.existsSync(LYRICS_DIR)) fs.mkdirSync(LYRICS_DIR, { recursive: true });
+        
         const slug = slugify(data.trackName || titre);
         const filePath = path.join(LYRICS_DIR, `${slug}.lrc`);
 
         const lrcHeader = [
             `[ti:${data.trackName || titre}]`,
             `[ar:${data.artistName || artiste}]`,
-            data.duration ? `[length:${Math.floor(data.duration / 60)}:${String(Math.floor(data.duration % 60)).padStart(2, '0')}]` : null,
+            data.duration ? `[length:${Math.floor(data.duration / 60)}:${String(Math.floor(data.duration % 60)).padStart(2, '0')}]` : '',
             '',
-        ].filter(l => l !== null).join('\n');
-
-        let finalContent = isSynced ? lrcHeader + lrcContent : lrcHeader + lrcContent.split('\n').map((line, i) => `[${String(Math.floor((i * 3000) / 60000)).padStart(2, '0')}:${String(Math.floor(((i * 3000) % 60000) / 1000)).padStart(2, '0')}.00] ${line}`).join('\n');
+        ].join('\n');
 
         try {
-            fs.writeFileSync(filePath, finalContent, 'utf-8');
+            fs.writeFileSync(filePath, lrcHeader + lrcContent, 'utf-8');
         } catch (e) {
             return interaction.editReply({ embeds: [errorEmbed(`Erreur écriture : ${e.message}`)] });
         }
@@ -128,13 +124,19 @@ module.exports = {
             embeds: [
                 new EmbedBuilder()
                     .setColor(0x57F287)
-                    .setTitle('✅ Paroles synchronisées !')
-                    .setDescription(`Le fichier a été validé par rapport à la durée de l'audio actuel.`)
+                    .setTitle('✅ Paroles ajoutées !')
                     .addFields(
-                        { name: '🎵 Titre', value: data.trackName, inline: true },
-                        { name: '⏱️ Durée', value: `${Math.floor(data.duration/60)}:${String(Math.floor(data.duration%60)).padStart(2, '0')}`, inline: true }
+                        { name: '🎵 Titre', value: data.trackName || titre, inline: true },
+                        { name: '⏱️ Durée', value: formatTime(data.duration), inline: true }
                     )
             ],
         });
     },
 };
+
+function formatTime(s) {
+    if (!s) return "Inconnu";
+    const min = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+}
