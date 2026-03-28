@@ -5,7 +5,7 @@ const {
 } = require('discord.js');
 const play = require('play-dl');
 const { getLyrics } = require('../utils/lyricsSync'); // Vérifie le chemin vers tes lyrics
-const { trainingSessions } = require('../utils/trainingManager'); // On va créer ce petit utilitaire après
+const { trainingSessions } = require('../utils/trainingManager'); 
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -18,7 +18,7 @@ module.exports = {
             return interaction.reply({ content: "⚠️ Trop d'entraînements en cours (max 4).", ephemeral: true });
         }
 
-        // 2. Affichage du Modal (comme /inscrire)
+        // 2. Affichage du Modal (Syntaxe + Artiste)
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Mode Entraînement');
@@ -26,8 +26,10 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const input = new TextInputBuilder()
                 .setCustomId(`song${i}`)
-                .setLabel(`Musique ${i} : Titre - Artiste = Lien`)
-                .setPlaceholder('Ex: Bohemian Rhapsody - Queen = https://youtu.be/...')
+                // CORRECTION : Label mis à jour avec le "+"
+                .setLabel(`Musique ${i} : Titre + Artiste = Lien`)
+                // CORRECTION : Exemple mis à jour avec le "+"
+                .setPlaceholder('Ex: Bohemian Rhapsody + Queen = https://youtu.be/...')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true);
             modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -35,7 +37,7 @@ module.exports = {
 
         await interaction.showModal(modal);
 
-        // 3. Réception et Validation (Rapport de conformité)
+        // 3. Réception et Validation
         const submitted = await interaction.awaitModalSubmit({
             time: 120000,
             filter: i => i.customId === `modal_train_${interaction.user.id}`,
@@ -49,26 +51,30 @@ module.exports = {
 
         for (let i = 1; i <= 3; i++) {
             const raw = submitted.fields.getTextInputValue(`song${i}`);
-            if (!raw.includes('=') || !raw.includes('-')) {
-                return submitted.editReply({ content: `❌ Format invalide pour la chanson ${i}. Utilisez : Titre - Artiste = Lien` });
+            
+            // CORRECTION : Vérification du "+" au lieu du "-"
+            if (!raw.includes('=') || !raw.includes('+')) {
+                return submitted.editReply({ content: `❌ Format invalide pour la chanson ${i}. Utilisez : Titre + Artiste = Lien` });
             }
 
+            // CORRECTION : Découpage (split) par le symbole "+"
             const [info, url] = raw.split('=').map(s => s.trim());
+            const [title, artist] = info.split('+').map(s => s.trim());
             
             try {
-                // Check YouTube (avec tes cookies Railway)
+                // Check YouTube
                 const ytInfo = await play.video_basic_info(url);
                 const ytSec = ytInfo.video_details.durationInSec;
 
                 // Check Lyrics
                 const lyrics = getLyrics(info);
-                const lySec = lyrics ? lyrics.length : 0; // Adapte selon comment ton API renvoie la durée
+                const lySec = lyrics ? lyrics.length : 0; 
 
                 const diff = Math.abs(ytSec - lySec);
                 const isValid = diff < 30;
 
                 reports.push(`${isValid ? '✅' : '⚠️'} **${info}**\n└ YouTube: ${ytSec}s | Paroles: ${lySec}s`);
-                songs.push({ info, url, duration: ytSec });
+                songs.push({ info, url, duration: ytSec, title, artist });
             } catch (err) {
                 return submitted.editReply({ content: `❌ Lien YouTube invalide pour la chanson ${i}` });
             }
@@ -91,14 +97,14 @@ module.exports = {
             channelId: channel.id,
             songs: songs,
             currentSongIndex: 0,
-            precisionTicks: 0, // Pour le vrai calcul de score
+            precisionTicks: 0, 
             createdAt: Date.now()
         };
 
         if (!global.trainingSessions) global.trainingSessions = new Map();
         global.trainingSessions.set(interaction.user.id, sessionData);
 
-        // 6. Sécurité Timers (3min et 20min)
+        // 6. Sécurité Timers (3min si vide, 20min max)
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch && ch.members.size === 0) {
