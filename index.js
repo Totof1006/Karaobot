@@ -4,6 +4,17 @@ const path = require('path');
 const DB_PATH = '/data/scores.json';
 require('dotenv').config();
 
+// --- SYNCHRONISATION DES COOKIES YOUTUBE ---
+if (process.env.YT_COOKIES_BASE64) {
+    try {
+        const cookieContent = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
+        fs.writeFileSync('/data/youtube_cookies.txt', cookieContent);
+        console.log("✅ Fichier youtube_cookies.txt généré dans le volume.");
+    } catch (err) {
+        console.error("❌ Erreur lors de la génération des cookies :", err.message);
+    }
+}
+
 // ─── 1. CONTRÔLE ANTI-CRASH (LOGS) ──────────────────────────────────────────
 process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ [ERREUR PROMESSE]', reason);
