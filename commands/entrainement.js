@@ -58,12 +58,12 @@ module.exports = {
 
         await submitted.deferReply({ ephemeral: true });
 
-        // 3. Définition de la variable SONGS (Indispensable pour corriger l'erreur !)
-        const songs = [
-            submitted.fields.getTextInputValue('chanson1'),
-            submitted.fields.getTextInputValue('chanson2'),
-            submitted.fields.getTextInputValue('chanson3')
-        ].filter(s => s !== ""); // On retire les vides
+       // 3. Définition de la variable SONGS (Formatée pour éviter l'erreur de slugify)
+       const songs = [
+            { info: submitted.fields.getTextInputValue('chanson1') },
+            { info: submitted.fields.getTextInputValue('chanson2') || "" },
+            { info: submitted.fields.getTextInputValue('chanson3') || "" }
+        ].filter(s => s.info !== ""); // On garde ceux qui ont un titre saisi
 
         // 4. Attribution du salon
         await channel.permissionOverwrites.edit(interaction.user.id, {
