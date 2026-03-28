@@ -1,23 +1,22 @@
 const { 
     SlashCommandBuilder, ChannelType, PermissionFlagsBits, 
     ModalBuilder, TextInputBuilder, TextInputStyle, 
-    ActionRowBuilder, EmbedBuilder 
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder 
 } = require('discord.js');
 const play = require('play-dl');
-const { getLyrics, slugify } = require('../utils/lyricsSync'); 
+const { getLyrics, slugify } = require('../utils/lyricsSync');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('entrainement')
-        .setDescription('🎤 Inscription et création d\'un salon de test privé'),
+        .setDescription('🎤 Crée un salon privé avec vérification par boutons'),
 
     async execute(interaction) {
-        // 1. Limite de sécurité pour l'hébergement (max 4 sessions simultanées)
         if (global.trainingSessions?.size >= 4) {
             return interaction.reply({ content: "⚠️ Trop d'entraînements en cours (max 4).", ephemeral: true });
         }
 
-        // 2. Création et affichage du Modal pour les 3 musiques
+        // 1. Affichage du Modal
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Mode Entraînement');
@@ -25,8 +24,8 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const input = new TextInputBuilder()
                 .setCustomId(`song${i}`)
-                .setLabel(`Musique ${i} : Titre + Artiste = Lien`)
-                .setPlaceholder('Ex: Ailleurs + Orelsan = https://youtu.be/...')
+                .setLabel(`Chanson n°${i} (Titre + Artiste = Lien)`)
+                .setPlaceholder('Ex: Soulman + Ben l\'Oncle Soul = https://...')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true);
             modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -34,7 +33,7 @@ module.exports = {
 
         await interaction.showModal(modal);
 
-        // 3. Réception et Validation des données du formulaire
+        // 2. Réception du Modal
         const submitted = await interaction.awaitModalSubmit({
             time: 120000,
             filter: i => i.customId === `modal_train_${interaction.user.id}`,
@@ -44,51 +43,16 @@ module.exports = {
         await submitted.deferReply({ ephemeral: true });
 
         const songs = [];
-        const reports = [];
-
         for (let i = 1; i <= 3; i++) {
             const raw = submitted.fields.getTextInputValue(`song${i}`);
-            
-            // Vérification du format strict exigé par ton projet
             if (!raw.includes('=') || !raw.includes('+')) {
-                return submitted.editReply({ content: `❌ Format invalide pour la chanson ${i}. Utilisez : Titre + Artiste = Lien` });
+                return submitted.editReply({ content: `❌ Format invalide (Chanson ${i}).` });
             }
-
             const [info, url] = raw.split('=').map(s => s.trim());
-            
-            try {
-                // Récupération de la durée YouTube
-                const ytInfo = await play.video_basic_info(url);
-                const ytSec = ytInfo.video_details.durationInSec;
-
-                // Récupération des paroles et de la durée synchronisée (.durationMs)
-                const lyrics = getLyrics(info);
-                
-                // Conversion en secondes pour la comparaison
-                const lySec = lyrics ? Math.round(lyrics.durationMs / 1000) : 0; 
-
-                // Algorithme de double vérification de conformité
-                const diff = Math.abs(ytSec - lySec);
-                const isValid = (lySec > 0 && diff <= 15); // Tolérance de 15 secondes max
-
-                let statusEmoji = isValid ? '✅' : '⚠️';
-                if (lySec === 0) statusEmoji = '❌';
-
-                // Construction de la ligne du rapport
-                reports.push(
-                    `${statusEmoji} **${info}**\n` +
-                    `└ YouTube: \`${ytSec}s\` | Paroles: \`${lySec}s\`\n` +
-                    `└ *${isValid ? "Correspondance validée !" : (lySec === 0 ? "Paroles introuvables" : "Écart trop important")}*`
-                );
-
-                songs.push({ info, url, duration: ytSec, lyricsFound: lySec > 0 });
-            } catch (err) {
-                console.error(err);
-                return submitted.editReply({ content: `❌ Erreur sur la chanson ${i}. Vérifie que le lien YouTube est correct.` });
-            }
+            songs.push({ info, url });
         }
 
-        // 4. Création du Salon Vocal Privé avec permissions adaptées
+        // 3. Création automatique du Salon Vocal Privé
         const channelName = `🎙️-test-${slugify(interaction.user.username)}`;
         const channel = await interaction.guild.channels.create({
             name: channelName,
@@ -100,36 +64,53 @@ module.exports = {
             ],
         });
 
-        // 5. Initialisation de la session globale
-        const sessionData = {
+        // 4. Enregistrement de la session
+        if (!global.trainingSessions) global.trainingSessions = new Map();
+        global.trainingSessions.set(interaction.user.id, {
             userId: interaction.user.id,
             channelId: channel.id,
             songs: songs,
-            currentSongIndex: 0,
-            precisionTicks: 0, 
             createdAt: Date.now()
-        };
+        });
 
-        if (!global.trainingSessions) global.trainingSessions = new Map();
-        global.trainingSessions.set(interaction.user.id, sessionData);
+        // ==========================================
+        // AJOUT : SÉCURITÉ ET SUPPRESSION DU SALON
+        // ==========================================
 
-        // 6. Sécurités de nettoyage automatique du salon vocal
+        // Sécurité 1 : Supprime le salon après 3 min s'il est vide
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch && ch.members.size === 0) {
                 await ch.delete().catch(() => {});
                 global.trainingSessions.delete(interaction.user.id);
             }
-        }, 180000); // 3 minutes si vide
+        }, 3 * 60 * 1000);
 
-        // 7. Envoi de l'Embed de confirmation (Style image 9b251a)
+        // Sécurité 2 : Suppression automatique après 20 min maximum
+        setTimeout(async () => {
+            const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
+            if (ch) {
+                await ch.delete().catch(() => {});
+                global.trainingSessions.delete(interaction.user.id);
+            }
+        }, 20 * 60 * 1000);
+
+        // ==========================================
+
+        // 5. Envoi du message avec les boutons
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier n°1').setButtonStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier n°2').setButtonStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`check_train_3_${interaction.user.id}`).setLabel('Vérifier n°3').setButtonStyle(ButtonStyle.Primary)
+        );
+
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
-            .setTitle('🎯 Rapport de Conformité Entraînement')
-            .setThumbnail(interaction.user.displayAvatarURL())
-            .setDescription(reports.join('\n\n') + `\n\n**Salon créé :** <#${channel.id}>\nRejoins le salon et tape \`/lancer-test\` !`)
-            .setFooter({ text: "Système de synchronisation Karaobot" });
+            .setTitle('🎶 Inscription Enregistrée !')
+            .setDescription(`Tes chansons ont été ajoutées. Clique sur les boutons ci-dessous pour vérifier la correspondance avec YouTube.\n\n` +
+                songs.map((s, idx) => `**Chanson ${idx+1}**\n${s.info}\nParoles : ⏳ En attente...`).join('\n\n'));
 
-        await submitted.editReply({ embeds: [embed] });
+        await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
+        await submitted.editReply({ content: `✅ Salon créé : <#${channel.id}>` });
     }
 };
