@@ -4,8 +4,7 @@ const {
     ActionRowBuilder, EmbedBuilder 
 } = require('discord.js');
 const play = require('play-dl');
-const { getLyrics } = require('../utils/lyricsSync'); 
-const { trainingSessions } = require('../utils/trainingManager'); 
+const { getLyrics, slugify } = require('../utils/lyricsSync'); 
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -13,12 +12,12 @@ module.exports = {
         .setDescription('🎤 Inscription et création d\'un salon de test privé'),
 
     async execute(interaction) {
-        // 1. Limite de sécurité (max 4 sessions)
+        // 1. Limite de sécurité pour l'hébergement (max 4 sessions simultanées)
         if (global.trainingSessions?.size >= 4) {
             return interaction.reply({ content: "⚠️ Trop d'entraînements en cours (max 4).", ephemeral: true });
         }
 
-        // 2. Affichage du Modal
+        // 2. Création et affichage du Modal pour les 3 musiques
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Mode Entraînement');
@@ -27,7 +26,7 @@ module.exports = {
             const input = new TextInputBuilder()
                 .setCustomId(`song${i}`)
                 .setLabel(`Musique ${i} : Titre + Artiste = Lien`)
-                .setPlaceholder('Ex: Bohemian Rhapsody + Queen = https://youtu.be/...')
+                .setPlaceholder('Ex: Ailleurs + Orelsan = https://youtu.be/...')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true);
             modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -35,7 +34,7 @@ module.exports = {
 
         await interaction.showModal(modal);
 
-        // 3. Réception et Validation
+        // 3. Réception et Validation des données du formulaire
         const submitted = await interaction.awaitModalSubmit({
             time: 120000,
             filter: i => i.customId === `modal_train_${interaction.user.id}`,
@@ -50,47 +49,58 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const raw = submitted.fields.getTextInputValue(`song${i}`);
             
+            // Vérification du format strict exigé par ton projet
             if (!raw.includes('=') || !raw.includes('+')) {
                 return submitted.editReply({ content: `❌ Format invalide pour la chanson ${i}. Utilisez : Titre + Artiste = Lien` });
             }
 
             const [info, url] = raw.split('=').map(s => s.trim());
-            const [title, artist] = info.split('+').map(s => s.trim());
-            
-            // FIX : On nettoie le "+" pour que la recherche de paroles soit identique à /evenement
-            const searchInfo = info.replace('+', ' ').trim();
             
             try {
-                // Check YouTube
+                // Récupération de la durée YouTube
                 const ytInfo = await play.video_basic_info(url);
                 const ytSec = ytInfo.video_details.durationInSec;
 
-                // Check Lyrics (Utilisation de searchInfo pour trouver les paroles)
-                const lyrics = getLyrics(searchInfo);
-                const lySec = lyrics ? lyrics.length : 0; 
+                // Récupération des paroles et de la durée synchronisée (.durationMs)
+                const lyrics = getLyrics(info);
+                
+                // Conversion en secondes pour la comparaison
+                const lySec = lyrics ? Math.round(lyrics.durationMs / 1000) : 0; 
 
+                // Algorithme de double vérification de conformité
                 const diff = Math.abs(ytSec - lySec);
-                const isValid = diff < 30;
+                const isValid = (lySec > 0 && diff <= 15); // Tolérance de 15 secondes max
 
-                reports.push(`${isValid ? '✅' : '⚠️'} **${info}**\n└ YouTube: ${ytSec}s | Paroles: ${lySec}s`);
-                songs.push({ info, url, duration: ytSec, title, artist });
+                let statusEmoji = isValid ? '✅' : '⚠️';
+                if (lySec === 0) statusEmoji = '❌';
+
+                // Construction de la ligne du rapport
+                reports.push(
+                    `${statusEmoji} **${info}**\n` +
+                    `└ YouTube: \`${ytSec}s\` | Paroles: \`${lySec}s\`\n` +
+                    `└ *${isValid ? "Correspondance validée !" : (lySec === 0 ? "Paroles introuvables" : "Écart trop important")}*`
+                );
+
+                songs.push({ info, url, duration: ytSec, lyricsFound: lySec > 0 });
             } catch (err) {
-                return submitted.editReply({ content: `❌ Lien YouTube invalide pour la chanson ${i}` });
+                console.error(err);
+                return submitted.editReply({ content: `❌ Erreur sur la chanson ${i}. Vérifie que le lien YouTube est correct.` });
             }
         }
 
-        // 4. Création du Salon Vocal Privé
+        // 4. Création du Salon Vocal Privé avec permissions adaptées
+        const channelName = `🎙️-test-${slugify(interaction.user.username)}`;
         const channel = await interaction.guild.channels.create({
-            name: `🎙️-test-${interaction.user.username}`,
+            name: channelName,
             type: ChannelType.GuildVoice,
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel] },
                 { id: interaction.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ViewChannel] },
-                { id: interaction.client.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] }
+                { id: interaction.client.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ViewChannel] }
             ],
         });
 
-        // 5. Enregistrement de la session
+        // 5. Initialisation de la session globale
         const sessionData = {
             userId: interaction.user.id,
             channelId: channel.id,
@@ -103,27 +113,22 @@ module.exports = {
         if (!global.trainingSessions) global.trainingSessions = new Map();
         global.trainingSessions.set(interaction.user.id, sessionData);
 
-        // 6. Sécurité Timers
+        // 6. Sécurités de nettoyage automatique du salon vocal
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch && ch.members.size === 0) {
                 await ch.delete().catch(() => {});
                 global.trainingSessions.delete(interaction.user.id);
             }
-        }, 3 * 60 * 1000);
+        }, 180000); // 3 minutes si vide
 
-        setTimeout(async () => {
-            const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
-            if (ch) {
-                await ch.delete().catch(() => {});
-                global.trainingSessions.delete(interaction.user.id);
-            }
-        }, 20 * 60 * 1000);
-
+        // 7. Envoi de l'Embed de confirmation (Style image 9b251a)
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle('🎯 Rapport de Conformité Entraînement')
-            .setDescription(reports.join('\n\n') + `\n\n**Salon créé :** <#${channel.id}>\nRejoins le salon et tape \`/lancer-test\` !`);
+            .setThumbnail(interaction.user.displayAvatarURL())
+            .setDescription(reports.join('\n\n') + `\n\n**Salon créé :** <#${channel.id}>\nRejoins le salon et tape \`/lancer-test\` !`)
+            .setFooter({ text: "Système de synchronisation Karaobot" });
 
         await submitted.editReply({ embeds: [embed] });
     }
