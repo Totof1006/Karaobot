@@ -58,12 +58,12 @@ module.exports = {
 
         await submitted.deferReply({ ephemeral: true });
 
-      // 3. Définition de la variable SONGS (Format texte brut)
-const songs = [
-    submitted.fields.getTextInputValue('chanson1'),
-    submitted.fields.getTextInputValue('chanson2'),
-    submitted.fields.getTextInputValue('chanson3')
-].filter(s => s !== ""); // On retire les vides
+        // 3. Définition de la variable SONGS (Format Objet pour compatibilité totale)
+        const songs = [
+            { info: submitted.fields.getTextInputValue('chanson1') },
+            { info: submitted.fields.getTextInputValue('chanson2') || "" },
+            { info: submitted.fields.getTextInputValue('chanson3') || "" }
+        ].filter(s => s.info !== "");
         
         // 4. Attribution du salon
         await channel.permissionOverwrites.edit(interaction.user.id, {
