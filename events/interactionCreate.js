@@ -84,45 +84,64 @@ module.exports = {
         const { customId, user, guildId } = interaction;
 
         try {
-            // 🔹 VÉRIFICATION MODE ENTRAÎNEMENT (Nouveau)
-            if (customId.startsWith('check_train_')) {
-                await interaction.deferReply({ ephemeral: true });
+            // 🔹 VÉRIFICATION MODE ENTRAÎNEMENT (AMÉLIORÉ)
+if (customId.startsWith('check_train_')) {
+    await interaction.deferReply({ ephemeral: true });
 
-                const [,, index, userId] = customId.split('_');
-                const session = global.trainingSessions?.get(userId);
-                
-                if (!session) return interaction.editReply({ content: "❌ Session d'entraînement introuvable ou expirée." });
+    const [,, index, userId] = customId.split('_');
+    const session = global.trainingSessions?.get(userId);
+    
+    if (!session) return interaction.editReply({ content: "❌ Session d'entraînement expirée." });
 
-                const song = session.songs[parseInt(index) - 1];
-                if (!song) return interaction.editReply({ content: "❌ Données de la chanson introuvables." });
+    const song = session.songs[parseInt(index) - 1];
+    if (!song) return interaction.editReply({ content: "❌ Données introuvables." });
 
-                // Récupération des durées (YouTube vs Paroles locales)
-                const youtubeDuration = await getAudioDuration(song.url);
-                const lyricsData = getLyrics(song.info);
-                const apiDuration = lyricsData ? Math.round(lyricsData.durationMs / 1000) : 0;
+    // 1. Durée YouTube
+    const youtubeDuration = await getAudioDuration(song.url);
 
-                const diff = Math.abs(youtubeDuration - apiDuration);
-                const isMatch = youtubeDuration > 0 && apiDuration > 0 && diff <= 15;
-
-                const embed = new EmbedBuilder()
-                    .setTitle(`🔍 Rapport de conformité : ${song.info.split('+')[0].trim()}`)
-                    .setColor(isMatch ? 0x57F287 : 0xED4245)
-                    .addFields(
-                        { name: '🎙️ Paroles (API)', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true }
-                    )
-                    .setFooter({ text: "Si YouTube affiche 'Incalculable', réessaie dans 1 minute." });
-
-                if (apiDuration === 0) {
-                    embed.setDescription("❌ **Verdict**\nParoles introuvables dans le dossier `/lyrics`.");
-                } else if (isMatch) {
-                    embed.setDescription("✅ **Verdict**\n**Correspondance validée !**");
-                } else {
-                    embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s détecté.**`);
-                }
-
-                return await interaction.editReply({ embeds: [embed] });
+    // 2. Recherche des paroles (Local d'abord, puis API LRCLIB)
+    let apiDuration = 0;
+    const localLyrics = getLyrics(song.info);
+    
+    if (localLyrics) {
+        apiDuration = Math.round(localLyrics.durationMs / 1000);
+    } else {
+        // Si pas de fichier local, on interroge LRCLIB directement
+        try {
+            const query = encodeURIComponent(song.info.split('=')[0].trim());
+            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
+            const results = await response.json();
+            if (results && results.length > 0) {
+                apiDuration = results[0].duration; // Durée en secondes de LRCLIB
             }
+        } catch (e) {
+            console.error("Erreur LRCLIB:", e);
+        }
+    }
+
+    const diff = Math.abs(youtubeDuration - apiDuration);
+    const isMatch = youtubeDuration > 0 && apiDuration > 0 && diff <= 15;
+
+    const embed = new EmbedBuilder()
+        .setTitle(`🔍 Rapport : ${song.info.split('+')[0].trim()}`)
+        .setColor(isMatch ? 0x57F287 : 0xED4245)
+        .addFields(
+            { name: '🎙️ Paroles (API/LRCLIB)', value: formatTime(apiDuration), inline: true },
+            { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true }
+        )
+        .setFooter({ text: "Si YouTube est 'Incalculable', réessaie dans 1 min." });
+
+    // Verdict dynamique
+    if (apiDuration === 0) {
+        embed.setDescription("❌ **Verdict**\nImpossible de trouver la durée (ni en local, ni sur LRCLIB).");
+    } else if (isMatch) {
+        embed.setDescription("✅ **Verdict**\n**Correspondance validée !**");
+    } else {
+        embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s détecté.**`);
+    }
+
+    return await interaction.editReply({ embeds: [embed] });
+}
 
             // 🔹 VÉRIFICATION MODE ÉVÉNEMENT (Existant)
             if (customId.startsWith('verify_song_')) {
