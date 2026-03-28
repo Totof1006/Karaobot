@@ -7,8 +7,11 @@ const {
     ModalBuilder, 
     TextInputBuilder, 
     TextInputStyle,
-    ChannelType 
+    ChannelType,
+    PermissionFlagsBits 
 } = require('discord.js');
+
+// --- MODULE PRINCIPAL ---
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,7 +23,6 @@ module.exports = {
         // ── 1. RECHERCHE DU SALON UNIQUE ─────────────────────────────────────
         const channelName = 'Entraînement 1';
         
-        // FIX : On utilise ChannelType.GuildVoice au lieu de .isVoice() qui cause ton crash (image_a9b0bd)
         const channel = interaction.guild.channels.cache.find(c => 
             c.name === channelName && c.type === ChannelType.GuildVoice
         );
@@ -40,17 +42,7 @@ module.exports = {
             });
         }
 
-        // ── 2. NETTOYAGE PRÉVENTIF (AVANT) ───────────────────────────────────
-        try {
-            const fetched = await channel.messages.fetch({ limit: 100 });
-            if (fetched.size > 0) {
-                await channel.bulkDelete(fetched, true).catch(() => {});
-            }
-        } catch (err) {
-            console.error("Erreur nettoyage préventif:", err);
-        }
-
-        // ── 3. MODAL (Format validé sur image_a86d4c) ────────────────────────
+        // ── 2. MODAL D'INSCRIPTION ───────────────────────────────────────────
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Entraînement');
@@ -73,7 +65,7 @@ module.exports = {
 
         await interaction.showModal(modal);
 
-        // ── 4. RÉCEPTION DES DONNÉES ─────────────────────────────────────────
+        // ── 3. RÉCEPTION DES DONNÉES ─────────────────────────────────────────
         const submitted = await interaction.awaitModalSubmit({
             time: 60000,
             filter: i => i.customId === `modal_train_${interaction.user.id}`
@@ -88,12 +80,22 @@ module.exports = {
             { info: submitted.fields.getTextInputValue('chanson3') || "" }
         ].filter(s => s.info.trim() !== "");
 
-        // ── 5. PERMISSIONS ET SESSION ───────────────────────────────────────
-        await channel.permissionOverwrites.edit(interaction.user.id, {
-            ViewChannel: true,
-            Connect: true,
-            Speak: true
-        });
+        // ── 4. PERMISSIONS ET SESSION (AVEC ACCÈS BOT) ──────────────────────
+        // On donne les droits à l'utilisateur ET au bot lui-même pour éviter l'erreur image_a9c3d8
+        await channel.permissionOverwrites.set([
+            {
+                id: interaction.guild.roles.everyone,
+                deny: [PermissionFlagsBits.ViewChannel], 
+            },
+            {
+                id: interaction.user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
+            },
+            {
+                id: interaction.client.user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ManageMessages],
+            }
+        ]);
 
         if (!global.trainingSessions) global.trainingSessions = new Map();
         
@@ -104,15 +106,18 @@ module.exports = {
             startTime: Date.now()
         });
 
-        // ── 6. NETTOYAGE AUTO (APRÈS 20 MIN) ─────────────────────────────────
+        // ── 5. NETTOYAGE AUTO (UNIQUEMENT À LA FIN - 20 MIN) ─────────────────
         setTimeout(async () => {
             const session = global.trainingSessions?.get(interaction.user.id);
             if (session) {
+                // Rétablir les permissions (retrait accès utilisateur)
                 await channel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
                 
                 try {
                     const finalFetch = await channel.messages.fetch({ limit: 100 });
-                    if (finalFetch.size > 0) await channel.bulkDelete(finalFetch, true).catch(() => {});
+                    if (finalFetch.size > 0) {
+                        await channel.bulkDelete(finalFetch, true).catch(() => {});
+                    }
                     await channel.send("✨ **Salon réinitialisé.**");
                 } catch (err) {}
 
@@ -125,7 +130,7 @@ module.exports = {
             }
         }, 20 * 60 * 1000);
 
-        // ── 7. INTERFACE (Boutons Primary vus sur image_a857de) ──────────────
+        // ── 6. INTERFACE DE CONTRÔLE ─────────────────────────────────────────
         const buttons = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier n°1').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier n°2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
@@ -134,7 +139,7 @@ module.exports = {
 
         await channel.send({ 
             content: `<@${interaction.user.id}>`,
-            embeds: [new EmbedBuilder().setTitle("🎤 Session d'Entraînement").setDescription("Salon vidé et réservé.")], 
+            embeds: [new EmbedBuilder().setTitle("🎤 Session d'Entraînement").setDescription("Salon réservé pour 20 minutes.")], 
             components: [buttons] 
         });
 
