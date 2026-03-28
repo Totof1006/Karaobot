@@ -3,8 +3,7 @@ const {
     ModalBuilder, TextInputBuilder, TextInputStyle, 
     ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder 
 } = require('discord.js');
-const play = require('play-dl');
-const { getLyrics, slugify } = require('../utils/lyricsSync');
+const { slugify } = require('../utils/lyricsSync');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -46,13 +45,13 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const raw = submitted.fields.getTextInputValue(`song${i}`);
             if (!raw.includes('=') || !raw.includes('+')) {
-                return submitted.editReply({ content: `❌ Format invalide (Chanson ${i}).` });
+                return submitted.editReply({ content: `❌ Format invalide (Chanson ${i}). Utilisez Titre + Artiste = Lien` });
             }
             const [info, url] = raw.split('=').map(s => s.trim());
             songs.push({ info, url });
         }
 
-        // 3. Création automatique du Salon Vocal Privé
+        // 3. Création du Salon Vocal Privé
         const channelName = `🎙️-test-${slugify(interaction.user.username)}`;
         const channel = await interaction.guild.channels.create({
             name: channelName,
@@ -73,11 +72,8 @@ module.exports = {
             createdAt: Date.now()
         });
 
-        // ==========================================
-        // AJOUT : SÉCURITÉ ET SUPPRESSION DU SALON
-        // ==========================================
-
-        // Sécurité 1 : Supprime le salon après 3 min s'il est vide
+        // --- TIMERS DE SÉCURITÉ ---
+        // Suppression après 3 min si vide
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch && ch.members.size === 0) {
@@ -86,7 +82,7 @@ module.exports = {
             }
         }, 3 * 60 * 1000);
 
-        // Sécurité 2 : Suppression automatique après 20 min maximum
+        // Suppression après 20 min max
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch) {
@@ -95,13 +91,20 @@ module.exports = {
             }
         }, 20 * 60 * 1000);
 
-        // ==========================================
-
-        // 5. Envoi du message avec les boutons
+        // 5. Envoi du message avec les boutons (CORRIGÉ)
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier n°1').setButtonStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier n°2').setButtonStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`check_train_3_${interaction.user.id}`).setLabel('Vérifier n°3').setButtonStyle(ButtonStyle.Primary)
+            new ButtonBuilder()
+                .setCustomId(`check_train_1_${interaction.user.id}`)
+                .setLabel('Vérifier n°1')
+                .setButtonStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`check_train_2_${interaction.user.id}`)
+                .setLabel('Vérifier n°2')
+                .setButtonStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`check_train_3_${interaction.user.id}`)
+                .setLabel('Vérifier n°3')
+                .setButtonStyle(ButtonStyle.Primary)
         );
 
         const embed = new EmbedBuilder()
