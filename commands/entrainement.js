@@ -6,10 +6,9 @@ const {
     EmbedBuilder, 
     ModalBuilder, 
     TextInputBuilder, 
-    TextInputStyle 
+    TextInputStyle,
+    ChannelType 
 } = require('discord.js');
-
-// --- MODULE PRINCIPAL ---
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -19,11 +18,11 @@ module.exports = {
     async execute(interaction) {
 
         // ── 1. RECHERCHE DU SALON UNIQUE ─────────────────────────────────────
-        const channelName = 'Entraînement 1'; // Nom visible sur image_a86d4c
+        const channelName = 'Entraînement 1';
         
-        // FIX CRASH image_a95703 : Vérification de l'existence du cache
+        // FIX : On utilise ChannelType.GuildVoice au lieu de .isVoice() qui cause ton crash (image_a9b0bd)
         const channel = interaction.guild.channels.cache.find(c => 
-            c.name === channelName && c.isVoice()
+            c.name === channelName && c.type === ChannelType.GuildVoice
         );
 
         if (!channel) {
@@ -51,15 +50,15 @@ module.exports = {
             console.error("Erreur nettoyage préventif:", err);
         }
 
-        // ── 3. MODAL (Format "Nom = URL" validé sur image_a86d4c) ──────────────
+        // ── 3. MODAL (Format validé sur image_a86d4c) ────────────────────────
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Entraînement');
 
         const input1 = new TextInputBuilder()
             .setCustomId('chanson1')
-            .setLabel('Titre n°1 (Nom = URL)')
-            .setPlaceholder('Ex: Lose Yourself = https://youtube.com/...')
+            .setLabel('Titre n°1 (Format: Nom = URL)')
+            .setPlaceholder('Ex: Envole-moi = https://youtube.com/...')
             .setStyle(TextInputStyle.Short)
             .setRequired(true);
 
@@ -134,11 +133,11 @@ module.exports = {
         );
 
         await channel.send({ 
-            content: `<@${interaction.user.id}>, ton salon est prêt !`,
+            content: `<@${interaction.user.id}>`,
             embeds: [new EmbedBuilder().setTitle("🎤 Session d'Entraînement").setDescription("Salon vidé et réservé.")], 
             components: [buttons] 
         });
 
-        await submitted.editReply({ content: `✅ Salon prêt : <#${channel.id}>` });
+        await submitted.editReply({ content: `✅ Salon réservé : <#${channel.id}>` });
     }
 };
