@@ -16,31 +16,20 @@ module.exports = {
             c.name === channelName && c.type === ChannelType.GuildVoice
         );
 
-        if (!channel) return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, ephemeral: true });
+        if (!channel) return interaction.reply({ content: `⚠️ Salon introuvable.`, ephemeral: true });
 
-        // Vérification d'occupation (image_a8c496)
-        if (channel.members.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
-            const hasBot = channel.members.has(interaction.client.user.id);
-            // Si le bot est seul, on considère le salon libre
-            if (channel.members.size > (hasBot ? 1 : 0)) {
-                return interaction.reply({ content: "⚠️ Le salon est déjà occupé par un autre chanteur.", ephemeral: true });
-            }
-        }
-
-        // --- 1. OUVERTURE DU MODAL ---
+        // MODAL
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Entraînement');
 
-        const input1 = new TextInputBuilder()
-            .setCustomId('chanson1').setLabel('Musique 1 (Nom = URL)').setStyle(TextInputStyle.Short).setRequired(true);
+        const input1 = new TextInputBuilder().setCustomId('chanson1').setLabel('Musique 1').setStyle(TextInputStyle.Short).setRequired(true);
         const input2 = new TextInputBuilder().setCustomId('chanson2').setLabel('Musique 2').setStyle(TextInputStyle.Short).setRequired(false);
         const input3 = new TextInputBuilder().setCustomId('chanson3').setLabel('Musique 3').setStyle(TextInputStyle.Short).setRequired(false);
 
         modal.addComponents(new ActionRowBuilder().addComponents(input1), new ActionRowBuilder().addComponents(input2), new ActionRowBuilder().addComponents(input3));
         await interaction.showModal(modal);
 
-        // --- 2. RÉCEPTION ET CONNEXION ---
         const submitted = await interaction.awaitModalSubmit({ time: 60000, filter: i => i.customId === `modal_train_${interaction.user.id}` }).catch(() => null);
         if (!submitted) return;
         await submitted.deferReply({ ephemeral: true });
@@ -51,14 +40,14 @@ module.exports = {
             { info: submitted.fields.getTextInputValue('chanson3') || "" }
         ].filter(s => s.info.trim() !== "");
 
-        // Réglage des permissions (Bot + User)
+        // Permissions
         await channel.permissionOverwrites.set([
             { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
             { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] },
             { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ManageMessages] }
         ]);
 
-        // --- AUTO-CONNEXION DU BOT ICI ---
+        // Connexion vocale immédiate
         const connection = joinVoiceChannel({
             channelId: channel.id,
             guildId: interaction.guildId,
@@ -66,34 +55,35 @@ module.exports = {
             selfDeaf: false,
         });
 
-        // On tente de stabiliser en arrière-plan pendant que l'utilisateur lit les instructions
-        entersState(connection, VoiceConnectionStatus.Ready, 20_000).catch(() => console.log("⏳ Stabilisation vocale en cours..."));
-
+        // Stockage CRUCIAL de la session
         if (!global.trainingSessions) global.trainingSessions = new Map();
-        global.trainingSessions.set(interaction.user.id, { 
+        
+        const sessionData = { 
             userId: interaction.user.id, 
             channelId: channel.id, 
             songs: songs,
-            connection: connection // On stocke la connexion pour lancer-test
-        });
+            connection: connection,
+            timestamp: Date.now() 
+        };
 
-        // Nettoyage final après 20 min
+        global.trainingSessions.set(interaction.user.id, sessionData);
+        console.log(`✅ Session créée pour ${interaction.user.id}`); // Log de debug
+
+        // Nettoyage après 20 minutes (sécurisé)
         setTimeout(async () => {
-            const session = global.trainingSessions?.get(interaction.user.id);
-            if (session) {
+            const currentSession = global.trainingSessions?.get(interaction.user.id);
+            // On ne nettoie que si c'est bien la session actuelle (basé sur le timestamp)
+            if (currentSession && currentSession.timestamp === sessionData.timestamp) {
+                console.log(`🧹 Nettoyage auto pour ${interaction.user.id}`);
                 if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
                 await channel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
-                try {
-                    const msgs = await channel.messages.fetch({ limit: 100 });
-                    if (msgs.size > 0) await channel.bulkDelete(msgs, true).catch(() => {});
-                } catch (e) {}
                 global.trainingSessions.delete(interaction.user.id);
             }
         }, 20 * 60 * 1000);
 
         await channel.send({ 
             content: `<@${interaction.user.id}>`,
-            embeds: [new EmbedBuilder().setTitle("🎤 Salon prêt").setDescription("Je suis déjà connecté dans le salon vocal. Tape `/lancer-test` dès que tu es prêt !")],
+            embeds: [new EmbedBuilder().setTitle("🎤 Salon prêt").setDescription("Bot connecté. Tape `/lancer-test` pour démarrer.")],
             components: [new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier 1').setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier 2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
@@ -101,6 +91,6 @@ module.exports = {
             )]
         });
 
-        await submitted.editReply({ content: `✅ Inscription réussie. Rejoins-moi dans <#${channel.id}> !` });
+        await submitted.editReply({ content: "✅ Inscription validée !" });
     }
 };
