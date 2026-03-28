@@ -12,8 +12,6 @@ const play = require('play-dl');
 const fs   = require('fs');
 const path = require('path');
 
-const play = require('play-dl');
-
 // Fonction pour activer les cookies
 async function activateYoutubeCookies() {
     try {
