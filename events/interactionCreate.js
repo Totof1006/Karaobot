@@ -5,7 +5,7 @@ const ytdl = require('@distube/ytdl-core');
 const { getSession, addPlayer } = require('../utils/gameState');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { joinButton, startButton } = require('../utils/buttons');
-const { getLyrics } = require('../utils/lyricsSync'); // Import pour l'entraînement
+const { getLyrics } = require('../utils/lyricsSync'); 
 
 const { 
     getEvent, unregisterPlayer, 
@@ -84,66 +84,70 @@ module.exports = {
         const { customId, user, guildId } = interaction;
 
         try {
-            // 🔹 VÉRIFICATION MODE ENTRAÎNEMENT (AMÉLIORÉ)
-if (customId.startsWith('check_train_')) {
-    await interaction.deferReply({ ephemeral: true });
+            // 🔹 VÉRIFICATION MODE ENTRAÎNEMENT (CORRIGÉ)
+            if (customId.startsWith('check_train_')) {
+                await interaction.deferReply({ ephemeral: true });
 
-    const [,, index, userId] = customId.split('_');
-    const session = global.trainingSessions?.get(userId);
-    
-    if (!session) return interaction.editReply({ content: "❌ Session d'entraînement expirée." });
+                // Correction du Split (pour éviter le crash image_a7f623)
+                const parts = customId.split('_');
+                const index = parseInt(parts[2]) - 1;
+                const userId = parts[3];
 
-    const song = session.songs[parseInt(index) - 1];
-    if (!song) return interaction.editReply({ content: "❌ Données introuvables." });
+                const session = global.trainingSessions?.get(userId);
+                if (!session) return interaction.editReply({ content: "❌ Session expirée ou introuvable." });
 
-    // 1. Durée YouTube
-    const youtubeDuration = await getAudioDuration(song.url);
+                const songData = session.songs[index];
+                if (!songData) return interaction.editReply({ content: "❌ Chanson introuvable." });
 
-    // 2. Recherche des paroles (Local d'abord, puis API LRCLIB)
-    let apiDuration = 0;
-    const localLyrics = getLyrics(song.info);
-    
-    if (localLyrics) {
-        apiDuration = Math.round(localLyrics.durationMs / 1000);
-    } else {
-        // Si pas de fichier local, on interroge LRCLIB directement
-        try {
-            const query = encodeURIComponent(song.info.split('=')[0].trim());
-            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
-            const results = await response.json();
-            if (results && results.length > 0) {
-                apiDuration = results[0].duration; // Durée en secondes de LRCLIB
+                // Extraction propre du nom (pour éviter le format [object Object] sur YouTube)
+                const songName = (typeof songData === 'object') ? songData.info : songData;
+
+                // 1. Durée YouTube (Récupération basée sur le nom si l'URL est manquante)
+                const youtubeDuration = await getAudioDuration(songData.url || "");
+
+                // 2. Recherche des paroles
+                let apiDuration = 0;
+                const localLyrics = getLyrics(songName); // Utilise songName (texte)
+                
+                if (localLyrics) {
+                    apiDuration = Math.round(localLyrics.durationMs / 1000);
+                } else {
+                    try {
+                        const query = encodeURIComponent(songName.trim());
+                        const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
+                        const results = await response.json();
+                        if (results && results.length > 0) {
+                            apiDuration = results[0].duration;
+                        }
+                    } catch (e) {
+                        console.error("Erreur LRCLIB:", e);
+                    }
+                }
+
+                const diff = Math.abs(youtubeDuration - apiDuration);
+                const isMatch = youtubeDuration > 0 && apiDuration > 0 && diff <= 15;
+
+                const embed = new EmbedBuilder()
+                    .setTitle(`🔍 Rapport : ${songName}`)
+                    .setColor(isMatch ? 0x57F287 : 0xED4245)
+                    .addFields(
+                        { name: '🎙️ Paroles (API/LRCLIB)', value: formatTime(apiDuration), inline: true },
+                        { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true }
+                    )
+                    .setFooter({ text: "Si YouTube est 'Incalculable', réessaie dans 1 min." });
+
+                if (apiDuration === 0) {
+                    embed.setDescription("❌ **Verdict**\nImpossible de trouver la durée des paroles.");
+                } else if (isMatch) {
+                    embed.setDescription("✅ **Verdict**\n**Correspondance validée !**");
+                } else {
+                    embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s détecté.**`);
+                }
+
+                return await interaction.editReply({ embeds: [embed] });
             }
-        } catch (e) {
-            console.error("Erreur LRCLIB:", e);
-        }
-    }
 
-    const diff = Math.abs(youtubeDuration - apiDuration);
-    const isMatch = youtubeDuration > 0 && apiDuration > 0 && diff <= 15;
-
-    const embed = new EmbedBuilder()
-        .setTitle(`🔍 Rapport : ${song.info.split('+')[0].trim()}`)
-        .setColor(isMatch ? 0x57F287 : 0xED4245)
-        .addFields(
-            { name: '🎙️ Paroles (API/LRCLIB)', value: formatTime(apiDuration), inline: true },
-            { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true }
-        )
-        .setFooter({ text: "Si YouTube est 'Incalculable', réessaie dans 1 min." });
-
-    // Verdict dynamique
-    if (apiDuration === 0) {
-        embed.setDescription("❌ **Verdict**\nImpossible de trouver la durée (ni en local, ni sur LRCLIB).");
-    } else if (isMatch) {
-        embed.setDescription("✅ **Verdict**\n**Correspondance validée !**");
-    } else {
-        embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s détecté.**`);
-    }
-
-    return await interaction.editReply({ embeds: [embed] });
-}
-
-            // 🔹 VÉRIFICATION MODE ÉVÉNEMENT (Existant)
+            // 🔹 VÉRIFICATION MODE ÉVÉNEMENT
             if (customId.startsWith('verify_song_')) {
                 await interaction.deferReply({ ephemeral: true });
 
@@ -172,7 +176,7 @@ if (customId.startsWith('check_train_')) {
                 return await interaction.editReply({ embeds: [embed] });
             }
 
-            // --- AUTRES BOUTONS (Inscription Event) ---
+            // --- AUTRES BOUTONS ---
             if (customId === 'event_register') {
                 const guard = checkAnnouncementButton(interaction);
                 if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
