@@ -6,37 +6,30 @@ const { getBeatLine } = require('./beatEngine');
 const LYRICS_DIR = path.join(__dirname, '../lyrics');
 
 function parseLRC(content) {
-  const lines = [];
-  const regex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
-  
-  for (const rawLine of content.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
-
-    const match = trimmed.match(regex);
-    if (!match) continue; 
-
-    const minutes = parseInt(match[1]);
-    const seconds = parseInt(match[2]);
-    const msStr = match[3];
-    const ms = msStr.length === 2 ? parseInt(msStr) * 10 : parseInt(msStr);
+    const lines = [];
+    const regex = /^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
     
-    const text = match[4].trim();
-    if (text) {
-      lines.push({ timeMs: minutes * 60_000 + seconds * 1_000 + ms, text });
+    for (const rawLine of content.split('\n')) {
+        const match = rawLine.trim().match(regex);
+        if (match) {
+            const msStr = match[3];
+            const ms = msStr.length === 2 ? parseInt(msStr) * 10 : parseInt(msStr);
+            lines.push({ 
+                timeMs: parseInt(match[1]) * 60_000 + parseInt(match[2]) * 1_000 + ms, 
+                text: match[4].trim() 
+            });
+        }
     }
-  }
+    
+    const sortedLines = lines.sort((a, b) => a.timeMs - b.timeMs);
 
-  const sortedLines = lines.sort((a, b) => a.timeMs - b.timeMs);
+    // On stocke la durée totale (dernière ligne + 3s de marge)
+    // On l'ajoute comme propriété au tableau pour ne pas casser tes boucles for/forEach
+    sortedLines.durationMs = sortedLines.length > 0 
+        ? sortedLines[sortedLines.length - 1].timeMs + 3000 
+        : 0;
 
-  // AJOUT : On attache la durée totale directement à l'objet array
-  // Cela permet de garder "lines" comme un tableau pour /evenement
-  // Tout en ayant accès à .totalDurationMs pour /entrainement
-  sortedLines.totalDurationMs = sortedLines.length > 0 
-    ? sortedLines[sortedLines.length - 1].timeMs + 2000 
-    : 0;
-
-  return sortedLines;
+    return sortedLines;
 }
 
 function slugify(name) {
