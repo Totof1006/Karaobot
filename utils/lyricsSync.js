@@ -1,7 +1,3 @@
-Voici le code complet et corrigé pour ton fichier lyricsSync.js.
-
-J'ai modifié la fonction slugify (ligne 30) pour qu'elle puisse accepter soit une chaîne de caractères (usage standard), soit un objet { info: "titre" } (usage entraînement). Cela empêchera l'erreur TypeError: Cannot read properties of undefined (reading 'toLowerCase') que l'on voit dans tes logs.
-
 JavaScript
 const fs = require('fs');
 const path = require('path');
