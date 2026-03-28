@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
+// AJOUT de VoiceConnectionStatus et entersState pour la stabilité
+const { joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const { playAudio } = require('../utils/audioPlayer');
 const { analyzeVoiceActivity } = require('../utils/voiceAnalyzer');
 
@@ -20,16 +21,24 @@ module.exports = {
             return interaction.reply({ content: "❌ Tu dois être dans ton salon vocal d'entraînement pour lancer le test.", ephemeral: true });
         }
 
-        await interaction.reply({ content: "🚀 Préparation de l'entraînement... Musique 1 dans 10 secondes !", ephemeral: false });
-
-        // Connexion au salon
+        // 1. Connexion initiale
         const connection = joinVoiceChannel({
             channelId: voiceChannel.id,
             guildId: interaction.guildId,
             adapterCreator: interaction.guild.voiceAdapterCreator,
-            selfDeaf: false, 
+            selfDeaf: false,
             selfMute: false,
         });
+
+        await interaction.reply({ content: "🚀 Connexion au salon en cours...", ephemeral: false });
+
+        // 2. FIX : Attente de la connexion réelle (évite l'AbortError)
+        try {
+            await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+        } catch (error) {
+            connection.destroy();
+            return interaction.followUp("❌ Erreur : Impossible de stabiliser la connexion vocale.");
+        }
 
         for (let i = 0; i < session.songs.length; i++) {
             const song = session.songs[i];
@@ -43,7 +52,7 @@ module.exports = {
             await interaction.channel.send({ embeds: [startEmbed] });
             await new Promise(resolve => setTimeout(resolve, 10000));
 
-            // Analyse vocale
+            // 3. Analyse vocale - On souscrit APRÈS que la connexion soit Ready
             session.precisionTicks = 0;
             const receiver = connection.receiver;
             const voiceStream = receiver.subscribe(interaction.user.id);
@@ -63,9 +72,9 @@ module.exports = {
                 }, interaction.user.id);
             });
 
-            // --- FIX : CALCUL DU SCORE SECURISE ---
-            // On calcule un score basé sur les ticks enregistrés durant la chanson
-            const rawScore = Math.min(Math.round((session.precisionTicks / (song.duration * 2)) * 100), 100);
+            // 4. Calcul du score (Simulateur)
+            // Ajustement : On divise par la durée pour un ratio cohérent
+            const rawScore = Math.min(Math.round((session.precisionTicks / (song.duration || 180)) * 100), 100);
             const rating = rawScore > 80 ? "⭐ Divin" : rawScore > 50 ? "✅ Pas mal" : "📉 À bosser";
 
             const scoreEmbed = new EmbedBuilder()
@@ -81,10 +90,12 @@ module.exports = {
             }
         }
 
-        await interaction.channel.send("🎉 **Entraînement terminé !** Suppression du salon dans 20 secondes.");
+        await interaction.channel.send("🎉 **Entraînement terminé !** Déconnexion dans 20 secondes.");
         
         setTimeout(async () => {
-            connection.destroy();
+            if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                connection.destroy();
+            }
             await interaction.channel.delete().catch(() => {});
             global.trainingSessions.delete(interaction.user.id);
         }, 20000);
