@@ -78,47 +78,45 @@ module.exports = {
             return;
         }
 
-        // ── 3. BOUTONS ──────────────────────────────────────────────────────
+        // ── 3. BOUTONS : INITIALISATION ─────────────────────────────────────
         if (!interaction.isButton()) return;
-
         const { customId, user, guildId } = interaction;
 
         try {
-            // 🔹 VÉRIFICATION MODE ENTRAÎNEMENT (CORRIGÉ)
+            // ── 4. BOUTONS : MODE ENTRAÎNEMENT ──────────────────────────────
             if (customId.startsWith('check_train_')) {
                 await interaction.deferReply({ ephemeral: true });
 
-                // Correction du Split (pour éviter le crash image_a7f623)
                 const parts = customId.split('_');
                 const index = parseInt(parts[2]) - 1;
                 const userId = parts[3];
 
                 const session = global.trainingSessions?.get(userId);
-                if (!session) return interaction.editReply({ content: "❌ Session expirée ou introuvable." });
+                if (!session) return interaction.editReply({ content: "❌ Session expirée." });
 
-                const songData = session.songs[index];
-                if (!songData) return interaction.editReply({ content: "❌ Chanson introuvable." });
+                const rawData = session.songs[index];
+                if (!rawData) return interaction.editReply({ content: "❌ Chanson introuvable." });
 
-                // Extraction propre du nom (pour éviter le format [object Object] sur YouTube)
-                const songName = (typeof songData === 'object') ? songData.info : songData;
+                // Extraction intelligente (Nom + URL)
+                const fullText = (typeof rawData === 'object') ? rawData.info : rawData;
+                const [namePart, urlPart] = fullText.split('=').map(s => s.trim());
+                const songName = namePart.split('+')[0].trim();
+                const youtubeUrl = urlPart || ""; 
 
-                // 1. Durée YouTube (Récupération basée sur le nom si l'URL est manquante)
-                const youtubeDuration = await getAudioDuration(songData.url || "");
+                // 1. Durée YouTube
+                const youtubeDuration = await getAudioDuration(youtubeUrl);
 
                 // 2. Recherche des paroles
                 let apiDuration = 0;
-                const localLyrics = getLyrics(songName); // Utilise songName (texte)
-                
+                const localLyrics = getLyrics(songName);
                 if (localLyrics) {
                     apiDuration = Math.round(localLyrics.durationMs / 1000);
                 } else {
                     try {
-                        const query = encodeURIComponent(songName.trim());
+                        const query = encodeURIComponent(songName);
                         const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
                         const results = await response.json();
-                        if (results && results.length > 0) {
-                            apiDuration = results[0].duration;
-                        }
+                        if (results && results.length > 0) apiDuration = results[0].duration;
                     } catch (e) {
                         console.error("Erreur LRCLIB:", e);
                     }
@@ -134,20 +132,20 @@ module.exports = {
                         { name: '🎙️ Paroles (API/LRCLIB)', value: formatTime(apiDuration), inline: true },
                         { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true }
                     )
-                    .setFooter({ text: "Si YouTube est 'Incalculable', réessaie dans 1 min." });
+                    .setFooter({ text: "Vérification basée sur l'URL après le '='" });
 
                 if (apiDuration === 0) {
-                    embed.setDescription("❌ **Verdict**\nImpossible de trouver la durée des paroles.");
+                    embed.setDescription("❌ **Verdict**\nParoles introuvables.");
                 } else if (isMatch) {
                     embed.setDescription("✅ **Verdict**\n**Correspondance validée !**");
                 } else {
-                    embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s détecté.**`);
+                    embed.setDescription(`⚠️ **Verdict**\n**Écart de ${Math.round(diff)}s.**`);
                 }
 
                 return await interaction.editReply({ embeds: [embed] });
             }
 
-            // 🔹 VÉRIFICATION MODE ÉVÉNEMENT
+            // ── 5. BOUTONS : MODE ÉVÉNEMENT ─────────────────────────────────
             if (customId.startsWith('verify_song_')) {
                 await interaction.deferReply({ ephemeral: true });
 
@@ -169,14 +167,13 @@ module.exports = {
                     .addFields(
                         { name: '⏱️ Paroles (API)', value: formatTime(apiDuration), inline: true },
                         { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s détecté.**` }
-                    )
-                    .setFooter({ text: "Si YouTube affiche 'Incalculable', réessaie dans 1 minute." });
+                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
+                    );
 
                 return await interaction.editReply({ embeds: [embed] });
             }
 
-            // --- AUTRES BOUTONS ---
+            // ── 6. BOUTONS : INSCRIPTIONS & GESTION ─────────────────────────
             if (customId === 'event_register') {
                 const guard = checkAnnouncementButton(interaction);
                 if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
