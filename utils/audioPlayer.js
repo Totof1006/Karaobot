@@ -12,6 +12,25 @@ const play = require('play-dl');
 const fs   = require('fs');
 const path = require('path');
 
+const play = require('play-dl');
+
+// Fonction pour activer les cookies
+async function activateYoutubeCookies() {
+    try {
+        await play.setToken({
+            youtube: {
+                cookie: "/data/youtube_cookies.txt"
+            }
+        });
+        console.log("✅ [YouTube] Authentification réussie avec les cookies !");
+    } catch (err) {
+        console.error("❌ [YouTube] Erreur d'authentification :", err.message);
+    }
+}
+
+// Appelle la fonction
+activateYoutubeCookies();
+
 // --- IMPORT DU RECEIVER ---
 const { setupUserReceiver } = require('./voiceReceiver');
 
