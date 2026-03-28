@@ -92,12 +92,12 @@ module.exports = {
                 const userId = parts[3];
 
                 const session = global.trainingSessions?.get(userId);
-                if (!session) return interaction.editReply({ content: "❌ Session expirée." });
+                if (!session) return interaction.editReply({ content: "❌ Session expirée ou introuvable." });
 
                 const rawData = session.songs[index];
                 if (!rawData) return interaction.editReply({ content: "❌ Chanson introuvable." });
 
-                // Logique d'extraction validée par image_a86d4c
+                // Extraction Nom/URL (Fonctionne sur image_a86d4c)
                 const fullText = (typeof rawData === 'object') ? rawData.info : rawData;
                 const [namePart, urlPart] = fullText.split('=').map(s => s.trim());
                 const songName = namePart.split('+')[0].trim();
@@ -171,7 +171,7 @@ module.exports = {
                 return await interaction.editReply({ embeds: [embed] });
             }
 
-            // ── 6. BOUTONS : INSCRIPTIONS & GESTION ─────────────────────────
+            // ── 6. BOUTONS : GESTION ÉVÉNEMENT ──────────────────────────────
             if (customId === 'event_register') {
                 const guard = checkAnnouncementButton(interaction);
                 if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
