@@ -4,7 +4,7 @@ const {
     ActionRowBuilder, EmbedBuilder 
 } = require('discord.js');
 const play = require('play-dl');
-const { getLyrics } = require('../utils/lyricsSync'); // Vérifie le chemin vers tes lyrics
+const { getLyrics } = require('../utils/lyricsSync'); 
 const { trainingSessions } = require('../utils/trainingManager'); 
 
 module.exports = {
@@ -18,7 +18,7 @@ module.exports = {
             return interaction.reply({ content: "⚠️ Trop d'entraînements en cours (max 4).", ephemeral: true });
         }
 
-        // 2. Affichage du Modal (Syntaxe + Artiste)
+        // 2. Affichage du Modal
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Mode Entraînement');
@@ -26,9 +26,7 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const input = new TextInputBuilder()
                 .setCustomId(`song${i}`)
-                // CORRECTION : Label mis à jour avec le "+"
                 .setLabel(`Musique ${i} : Titre + Artiste = Lien`)
-                // CORRECTION : Exemple mis à jour avec le "+"
                 .setPlaceholder('Ex: Bohemian Rhapsody + Queen = https://youtu.be/...')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true);
@@ -52,22 +50,23 @@ module.exports = {
         for (let i = 1; i <= 3; i++) {
             const raw = submitted.fields.getTextInputValue(`song${i}`);
             
-            // CORRECTION : Vérification du "+" au lieu du "-"
             if (!raw.includes('=') || !raw.includes('+')) {
                 return submitted.editReply({ content: `❌ Format invalide pour la chanson ${i}. Utilisez : Titre + Artiste = Lien` });
             }
 
-            // CORRECTION : Découpage (split) par le symbole "+"
             const [info, url] = raw.split('=').map(s => s.trim());
             const [title, artist] = info.split('+').map(s => s.trim());
+            
+            // FIX : On nettoie le "+" pour que la recherche de paroles soit identique à /evenement
+            const searchInfo = info.replace('+', ' ').trim();
             
             try {
                 // Check YouTube
                 const ytInfo = await play.video_basic_info(url);
                 const ytSec = ytInfo.video_details.durationInSec;
 
-                // Check Lyrics
-                const lyrics = getLyrics(info);
+                // Check Lyrics (Utilisation de searchInfo pour trouver les paroles)
+                const lyrics = getLyrics(searchInfo);
                 const lySec = lyrics ? lyrics.length : 0; 
 
                 const diff = Math.abs(ytSec - lySec);
@@ -104,7 +103,7 @@ module.exports = {
         if (!global.trainingSessions) global.trainingSessions = new Map();
         global.trainingSessions.set(interaction.user.id, sessionData);
 
-        // 6. Sécurité Timers (3min si vide, 20min max)
+        // 6. Sécurité Timers
         setTimeout(async () => {
             const ch = await interaction.guild.channels.fetch(channel.id).catch(() => null);
             if (ch && ch.members.size === 0) {
