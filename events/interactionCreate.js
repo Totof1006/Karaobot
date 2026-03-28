@@ -97,16 +97,14 @@ module.exports = {
                 const rawData = session.songs[index];
                 if (!rawData) return interaction.editReply({ content: "❌ Chanson introuvable." });
 
-                // Extraction intelligente (Nom + URL)
+                // Logique d'extraction validée par image_a86d4c
                 const fullText = (typeof rawData === 'object') ? rawData.info : rawData;
                 const [namePart, urlPart] = fullText.split('=').map(s => s.trim());
                 const songName = namePart.split('+')[0].trim();
                 const youtubeUrl = urlPart || ""; 
 
-                // 1. Durée YouTube
                 const youtubeDuration = await getAudioDuration(youtubeUrl);
 
-                // 2. Recherche des paroles
                 let apiDuration = 0;
                 const localLyrics = getLyrics(songName);
                 if (localLyrics) {
