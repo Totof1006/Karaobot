@@ -12,10 +12,10 @@ module.exports = {
 
         const voiceChannel = interaction.member.voice.channel;
         if (!voiceChannel || voiceChannel.id !== session.channelId) {
-            return interaction.reply({ content: "❌ Tu n'es pas dans le salon vocal.", ephemeral: true });
+            return interaction.reply({ content: "❌ Rejoins ton salon vocal d'entraînement.", ephemeral: true });
         }
 
-        await interaction.reply({ content: "🚀 Stabilisation de la connexion...", ephemeral: false });
+        await interaction.reply({ content: "🚀 Préparation de la voix...", ephemeral: false });
 
         const connection = joinVoiceChannel({
             channelId: voiceChannel.id,
@@ -25,19 +25,17 @@ module.exports = {
         });
 
         try {
-            // Tentative de stabilisation sur 30 secondes
             await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
         } catch (error) {
-            console.error("❌ Erreur stabilisation Railway:", error.message);
             connection.destroy();
-            return interaction.followUp("⚠️ Connexion interrompue par Discord (Aborted). Attends 2 secondes et relance la commande.");
+            return interaction.followUp("⚠️ Discord a refusé la connexion (Aborted). Réessaie.");
         }
 
         for (let i = 0; i < session.songs.length; i++) {
             const songName = session.songs[i].info.split('=')[0].trim();
             const songUrl = session.songs[i].info.split('=')[1]?.trim() || "";
 
-            await interaction.channel.send({ embeds: [new EmbedBuilder().setColor(0xFF69B4).setTitle(`Musique ${i+1}`).setDescription(`Prêt pour : **${songName}**`)] });
+            await interaction.channel.send({ embeds: [new EmbedBuilder().setColor(0xFF69B4).setTitle(`Musique ${i+1}`).setDescription(`Prêt : **${songName}**`)] });
             await new Promise(r => setTimeout(r, 8000));
 
             session.precisionTicks = 0;
@@ -50,13 +48,14 @@ module.exports = {
                 playAudio(voiceChannel, songUrl, () => resolve(), (err) => resolve(), interaction.user.id);
             });
 
-            const score = Math.min(Math.round((session.precisionTicks / 360) * 100), 100);
+            // Score indicatif
+            const score = Math.min(Math.round((session.precisionTicks / 300) * 100), 100);
             await interaction.channel.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle("📊 Score").setDescription(`Score : **${score}%**`)] });
 
             if (i < session.songs.length - 1) await new Promise(r => setTimeout(r, 3000));
         }
 
-        await interaction.channel.send("🎉 **Terminé !**");
+        await interaction.channel.send("🎉 **Séquence terminée !**");
         setTimeout(() => { if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy(); }, 5000);
     }
 };
