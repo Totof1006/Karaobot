@@ -5,6 +5,9 @@ const {
 } = require('discord.js');
 const { joinVoiceChannel, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 
+// Initialisation sécurisée de la Map globale
+if (!global.trainingSessions) global.trainingSessions = new Map();
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('entrainement')
@@ -47,7 +50,7 @@ module.exports = {
             { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ManageMessages] }
         ]);
 
-        // Connexion vocale immédiate
+        // Connexion vocale
         const connection = joinVoiceChannel({
             channelId: channel.id,
             guildId: interaction.guildId,
@@ -55,42 +58,56 @@ module.exports = {
             selfDeaf: false,
         });
 
-        // Stockage CRUCIAL de la session
-        if (!global.trainingSessions) global.trainingSessions = new Map();
-        
-        const sessionData = { 
+        // --- STOCKAGE PERSISTANT ---
+        const sessionId = Date.now(); // Identifiant unique de session
+        global.trainingSessions.set(interaction.user.id, { 
             userId: interaction.user.id, 
             channelId: channel.id, 
             songs: songs,
             connection: connection,
-            timestamp: Date.now() 
-        };
+            sessionId: sessionId 
+        });
 
-        global.trainingSessions.set(interaction.user.id, sessionData);
-        console.log(`✅ Session créée pour ${interaction.user.id}`); // Log de debug
+        console.log(`✅ [SESSION START] Utilisateur: ${interaction.user.id} | ID: ${sessionId}`);
 
-        // Nettoyage après 20 minutes (sécurisé)
+        // --- NETTOYAGE APRÈS 20 MINUTES (VALEUR FIXE EN MS) ---
+        const VINGT_MINUTES = 20 * 60 * 1000; 
+        
         setTimeout(async () => {
-            const currentSession = global.trainingSessions?.get(interaction.user.id);
-            // On ne nettoie que si c'est bien la session actuelle (basé sur le timestamp)
-            if (currentSession && currentSession.timestamp === sessionData.timestamp) {
-                console.log(`🧹 Nettoyage auto pour ${interaction.user.id}`);
-                if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+            const sessionToCheck = global.trainingSessions.get(interaction.user.id);
+            
+            // On vérifie que c'est toujours la MÊME session avant de supprimer
+            if (sessionToCheck && sessionToCheck.sessionId === sessionId) {
+                console.log(`🧹 [SESSION END] Nettoyage auto pour ${interaction.user.id}`);
+                
+                if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                    connection.destroy();
+                }
+                
                 await channel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
+                
+                try {
+                    const msgs = await channel.messages.fetch({ limit: 50 });
+                    if (msgs.size > 0) await channel.bulkDelete(msgs, true);
+                } catch (e) {}
+                
                 global.trainingSessions.delete(interaction.user.id);
             }
-        }, 20 * 60 * 1000);
+        }, VINGT_MINUTES);
+
+        // Envoi de l'interface
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier 1').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier 2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
+            new ButtonBuilder().setCustomId(`check_train_3_${interaction.user.id}`).setLabel('Vérifier 3').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 3)
+        );
 
         await channel.send({ 
             content: `<@${interaction.user.id}>`,
-            embeds: [new EmbedBuilder().setTitle("🎤 Salon prêt").setDescription("Bot connecté. Tape `/lancer-test` pour démarrer.")],
-            components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier 1').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier 2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
-                new ButtonBuilder().setCustomId(`check_train_3_${interaction.user.id}`).setLabel('Vérifier 3').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 3)
-            )]
+            embeds: [new EmbedBuilder().setTitle("🎤 Salon prêt").setDescription("Tape `/lancer-test` pour commencer.")],
+            components: [row]
         });
 
-        await submitted.editReply({ content: "✅ Inscription validée !" });
+        await submitted.editReply({ content: "✅ Session activée !" });
     }
 };
