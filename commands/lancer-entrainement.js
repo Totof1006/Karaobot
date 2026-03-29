@@ -27,64 +27,81 @@ module.exports = {
             });
         }
 
-        // 2. RÉCUPÉRATION DE LA CONNEXION EXISTANTE
         const connection = session.connection;
-
-        await interaction.reply({ content: "🎤 Micro vérifié. Préparation de la première piste...", ephemeral: false });
+        await interaction.reply({ content: "🎤 Micro vérifié. Préparation de la séquence...", ephemeral: false });
 
         try {
-            // On s'assure juste que la connexion faite précédemment est toujours active
+            // Vérification de l'état de la connexion (Vérification n°1)
             await entersState(connection, VoiceConnectionStatus.Ready, 5_000);
         } catch (error) {
             return interaction.followUp("⚠️ La connexion a été perdue. Relance `/entrainement`.");
         }
 
-        // 3. BOUCLE DE LECTURE
+        // 3. BOUCLE DE LECTURE SÉCURISÉE (Vérification n°2)
         for (let i = 0; i < session.songs.length; i++) {
             const song = session.songs[i];
-            const songName = song.info.split('=')[0].trim();
-            const songUrl = song.info.split('=')[1]?.trim() || "";
+            const parts = song.info.split('=');
+            const songName = parts[0].trim();
+            const songUrl = parts[1]?.trim() || "";
 
             const startEmbed = new EmbedBuilder()
                 .setColor(0xFF69B4)
                 .setTitle(`Musique ${i + 1}/${session.songs.length}`)
-                .setDescription(`Titre : **${songName}**\nDébut dans 10 secondes...`);
+                .setDescription(`Titre : **${songName}**\nAnalyse du flux audio en cours...`);
             
             await interaction.channel.send({ embeds: [startEmbed] });
-            await new Promise(resolve => setTimeout(resolve, 10000));
 
-            // Analyse vocale
+            // --- GESTION DE L'ANALYSE VOCALE ---
             session.precisionTicks = 0;
-            const receiver = connection.receiver;
-            const voiceStream = receiver.subscribe(interaction.user.id);
+            let voiceStream = null; // On initialise à null (Vérification n°3)
             
-            analyzeVoiceActivity(voiceStream, () => {
-                session.precisionTicks++; 
-            });
+            try {
+                const receiver = connection.receiver;
+                voiceStream = receiver.subscribe(interaction.user.id);
+                
+                analyzeVoiceActivity(voiceStream, () => {
+                    session.precisionTicks++; 
+                });
+            } catch (e) {
+                console.error("Erreur flux vocal:", e);
+            }
 
-            await interaction.channel.send(`🎶 Lecture en cours : **${songName}**`);
-            
-            // Lecture
+            // --- LECTURE AUDIO AVEC NETTOYAGE FORCÉ ---
             await new Promise((resolve) => {
-                playAudio(voiceChannel, songUrl, () => resolve(), (err) => resolve(), interaction.user.id);
+                playAudio(voiceChannel, songUrl, () => {
+                    // Fin de lecture normale (Vérification n°4)
+                    if (voiceStream) {
+                        voiceStream.destroy();
+                        voiceStream = null;
+                    }
+                    resolve();
+                }, (err) => {
+                    // Erreur de lecture (Vérification n°5)
+                    console.error("Erreur PlayAudio:", err);
+                    if (voiceStream) {
+                        voiceStream.destroy();
+                        voiceStream = null;
+                    }
+                    resolve();
+                }, interaction.user.id);
             });
 
-            // Score rapide
-            const score = Math.min(Math.round((session.precisionTicks / 300) * 100), 100);
+            // --- CALCUL DU SCORE ---
+            const score = Math.min(Math.round((session.precisionTicks / 400) * 100), 100);
+            
             const scoreEmbed = new EmbedBuilder()
-                .setColor(0x57F287)
-                .setTitle(`📊 Résultat Musique ${i + 1}`)
-                .setDescription(`Score de précision : **${score}%**`);
+                .setColor(score > 50 ? 0x57F287 : 0xFFAA00)
+                .setTitle(`📊 Résultat : ${songName}`)
+                .setDescription(`Précision vocale : **${score}%**\n${score < 30 ? "⚠️ *Attention aux décalages (intros YouTube) !*" : "Bien chanté !"}`);
             
             await interaction.channel.send({ embeds: [scoreEmbed] });
 
+            // Pause de sécurité pour laisser Railway respirer
             if (i < session.songs.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise(r => setTimeout(r, 4000));
             }
         }
 
-        await interaction.channel.send("🎉 **Séquence terminée !** Bien joué.");
-        
-        // On ne détruit pas la connexion ici, on laisse le timer de 20min de entrainement.js gérer la sortie
+        await interaction.channel.send("🎉 **Séquence d'entraînement terminée !**");
     }
 };
