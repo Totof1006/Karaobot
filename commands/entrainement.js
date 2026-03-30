@@ -1,105 +1,64 @@
-const { 
-    SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
-    EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, 
-    ChannelType, PermissionFlagsBits 
-} = require('discord.js');
-const { joinVoiceChannel } = require('@discordjs/voice');
+const { SlashCommandBuilder } = require('discord.js');
+const {
+    joinVoiceChannel,
+    entersState,
+    VoiceConnectionStatus
+} = require('@discordjs/voice');
 
-if (!global.trainingSessions) global.trainingSessions = new Map();
+const { setupUserReceiver } = require('../utils/voiceReceiver');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('entrainement')
-        .setDescription('🎤 Inscription (3 musiques) et connexion automatique'),
+        .setDescription('🎧 Prépare le salon pour un entraînement vocal'),
 
     async execute(interaction) {
-        const channelName = 'Entraînement 1';
-        const channel = interaction.guild.channels.cache.find(c => c.name === channelName);
+        const voiceChannel = interaction.member.voice.channel;
 
-        if (!channel) return interaction.reply({ content: "⚠️ Salon introuvable.", ephemeral: true });
+        // Vérification : l’utilisateur doit être dans un vocal
+        if (!voiceChannel) {
+            return interaction.reply({
+                content: "❌ Tu dois être dans un salon vocal pour lancer l’entraînement.",
+                ephemeral: true
+            });
+        }
 
-        // 1. CRÉATION DU MODAL AVEC 3 CHAMPS
-        const modal = new ModalBuilder()
-            .setCustomId(`modal_train_${interaction.user.id}`)
-            .setTitle('Inscription Entraînement');
-
-        const input1 = new TextInputBuilder().setCustomId('chanson1').setLabel('Musique 1').setStyle(TextInputStyle.Short).setRequired(true);
-        const input2 = new TextInputBuilder().setCustomId('chanson2').setLabel('Musique 2').setStyle(TextInputStyle.Short).setRequired(false);
-        const input3 = new TextInputBuilder().setCustomId('chanson3').setLabel('Musique 3').setStyle(TextInputStyle.Short).setRequired(false);
-
-        // Chaque champ DOIT être dans sa propre ActionRow
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(input1),
-            new ActionRowBuilder().addComponents(input2),
-            new ActionRowBuilder().addComponents(input3)
-        );
-        
-        await interaction.showModal(modal);
-
-        // 2. RÉCEPTION DU FORMULAIRE
-        const submitted = await interaction.awaitModalSubmit({ 
-            time: 60000, 
-            filter: i => i.customId === `modal_train_${interaction.user.id}` 
-        }).catch(() => null);
-
-        if (!submitted) return;
-        await submitted.deferReply({ ephemeral: true });
-
-        // 3. RÉCUPÉRATION DES VALEURS
-        const songs = [
-            { info: submitted.fields.getTextInputValue('chanson1') },
-            { info: submitted.fields.getTextInputValue('chanson2') || "" },
-            { info: submitted.fields.getTextInputValue('chanson3') || "" }
-        ].filter(s => s.info.trim() !== ""); // On ne garde que les champs remplis
-
-        // 4. CONNEXION VOCALE
+        // Connexion vocale persistante
         const connection = joinVoiceChannel({
-            channelId: channel.id,
-            guildId: interaction.guildId,
-            adapterCreator: interaction.guild.voiceAdapterCreator,
+            channelId: voiceChannel.id,
+            guildId: voiceChannel.guild.id,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
             selfDeaf: false,
+            selfMute: false
         });
 
-        // 5. ENREGISTREMENT DE LA SESSION
-        global.trainingSessions.set(interaction.user.id, {
+        try {
+            // On attend que la connexion soit prête
+            await entersState(connection, VoiceConnectionStatus.Ready, 5000);
+        } catch (err) {
+            console.error("[Entraînement] Connexion impossible :", err);
+            return interaction.reply({
+                content: "❌ Impossible de rejoindre le salon vocal.",
+                ephemeral: true
+            });
+        }
+
+        // Création de la session PRO
+        const session = {
             userId: interaction.user.id,
-            channelId: channel.id,
-            songs: songs,
-            connection: connection,
-            active: true
-        });
+            connection,
+            player: null,            // sera créé automatiquement par audioPlayer.js
+            receiverStream: null,    // sera créé par setupUserReceiver
+            precisionTicks: 0,       // compteur de scoring
+            songs: []                // sera rempli par /lancer-test
+        };
 
-        console.log(`✅ [SESSION START] Utilisateur: ${interaction.user.id} avec ${songs.length} musiques`);
+        // Stockage global
+        global.trainingSessions.set(interaction.user.id, session);
 
-        // 6. ENVOI DE L'INTERFACE AVEC LES 3 BOUTONS
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`check_train_1_${interaction.user.id}`)
-                .setLabel('Vérifier 1')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId(`check_train_2_${interaction.user.id}`)
-                .setLabel('Vérifier 2')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(songs.length < 2),
-            new ButtonBuilder()
-                .setCustomId(`check_train_3_${interaction.user.id}`)
-                .setLabel('Vérifier 3')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(songs.length < 3)
-        );
+        // Activation du receiver individuel
+        setupUserReceiver(session, interaction.user.id);
 
-        await channel.send({ 
-            content: `<@${interaction.user.id}>`,
-            embeds: [
-                new EmbedBuilder()
-                    .setTitle("🎤 Session d'entraînement prête")
-                    .setDescription(`Bot connecté. **${songs.length}** musique(s) enregistrée(s).\nTape \`/lancer-test\` pour démarrer la lecture.`)
-                    .setColor(0x5865F2)
-            ],
-            components: [row]
-        });
-
-        await submitted.editReply("✅ Inscription réussie ! Rejoins le salon vocal.");
+        return interaction.reply("✅ Entraînement initialisé ! Lance `/lancer-test` pour commencer.");
     }
 };
