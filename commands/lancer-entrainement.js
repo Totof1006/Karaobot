@@ -60,17 +60,17 @@ module.exports = {
                 console.error("Erreur micro:", e.message);
             }
 
-            // LECTURE AUDIO
-            await new Promise((resolve) => {
-                // Note : On passe 'connection' au lieu de 'voiceChannel' pour être plus standard (Point n°3)
-                playAudio(connection, songUrl, () => {
-                    if (voiceStream?.destroy) voiceStream.destroy(); // Point n°5
-                    resolve();
-                }, (err) => {
-                    if (voiceStream?.destroy) voiceStream.destroy();
-                    resolve();
-                }, interaction.user.id);
-            });
+ // --- LECTURE AUDIO AVEC LE MODE PERSISTANT (true) ---
+await new Promise((resolve) => {
+    playAudio(voiceChannel, songUrl, () => {
+        if (voiceStream?.destroy) voiceStream.destroy();
+        resolve();
+    }, (err) => {
+        console.error("Erreur PlayAudio:", err);
+        if (voiceStream?.destroy) voiceStream.destroy();
+        resolve();
+    }, interaction.user.id, true); // <--- Le "true" ici active la connexion persistante
+});
 
             // SCORE
             const score = Math.min(Math.round((session.precisionTicks / 400) * 100), 100);
