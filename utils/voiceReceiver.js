@@ -1,31 +1,54 @@
 const { EndBehaviorType } = require('@discordjs/voice');
 
 /**
- * Prépare la réception audio pour un utilisateur spécifique
- * @param {VoiceConnection} connection - La connexion vocale active
- * @param {string} userId - L'ID du chanteur à écouter
- * @returns {AudioReceiveStream|null}
+ * Initialise un receiver PRO pour un utilisateur donné
+ * - Écoute uniquement userId
+ * - Incrémente session.precisionTicks à chaque paquet audio
+ * - Ne se recrée pas entre les musiques
  */
-function setupUserReceiver(connection, userId) {
-    if (!connection) return null;
-
+function setupUserReceiver(session, userId) {
     try {
-        const receiver = connection.receiver.subscribe(userId, {
-            mode: 'opus', // Précise le mode explicitement
+        const receiver = session.connection.receiver;
+
+        // On s'abonne au flux vocal de l'utilisateur
+        const audioStream = receiver.subscribe(userId, {
             end: {
-                behavior: EndBehaviorType.Manual,
-            },
+                behavior: EndBehaviorType.Manual
+            }
         });
 
-        // Gestion d'erreur sur le flux
-        receiver.on('error', (err) => {
-            console.error(`[Audio Receiver] Erreur flux pour ${userId}:`, err.message);
+        // Détection simple : si data arrive → l’utilisateur chante
+        audioStream.on('data', () => {
+            session.precisionTicks++;
         });
 
-        console.log(`[Audio] Écoute activée pour l'utilisateur : ${userId}`);
-        return receiver;
-    } catch (error) {
-        console.error(`[Audio Receiver] Échec de l'abonnement pour ${userId}:`, error.message);
-        return null;
+        audioStream.on('error', err => {
+            console.error("[Receiver] Erreur flux vocal :", err);
+        });
+
+        // On stocke le flux pour pouvoir le stopper proprement
+        session.receiverStream = audioStream;
+
+    } catch (err) {
+        console.error("[Receiver] setupUserReceiver error:", err);
     }
 }
+
+/**
+ * Stop PRO
+ * - Détruit uniquement le flux audio
+ * - Ne détruit PAS la connexion
+ * - Ne détruit PAS le player
+ */
+function stopReceiver(session) {
+    try {
+        if (session.receiverStream) {
+            session.receiverStream.destroy();
+            session.receiverStream = null;
+        }
+    } catch (e) {
+        console.error("[Receiver] stopReceiver error:", e);
+    }
+}
+
+module.exports = { setupUserReceiver, stopReceiver };
