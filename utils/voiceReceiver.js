@@ -18,9 +18,11 @@ function setupUserReceiver(session, userId) {
         });
 
         // Détection simple : si data arrive → l’utilisateur chante
-        audioStream.on('data', () => {
-            session.precisionTicks++;
-        });
+       const { analyzeVoiceActivity } = require('./voiceAnalyzer');
+
+analyzeVoiceActivity(audioStream, (energy) => {
+    session.precisionTicks++;
+});
 
         audioStream.on('error', err => {
             console.error("[Receiver] Erreur flux vocal :", err);
