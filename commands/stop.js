@@ -1,54 +1,40 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { getSession, deleteSession }                = require('../utils/gameState');
-const { errorEmbed, successEmbed }                 = require('../utils/embeds');
-const { ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
-const { findVoiceChannel, unmuteSingersOnly }      = require('../utils/voiceManager');
+const { SlashCommandBuilder } = require('discord.js');
+const { stopReceiver } = require('../utils/voiceReceiver');
+const { stopAudio } = require('../utils/audioPlayer');
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('stop')
-    .setDescription('🛑 Arrête la session karaoké en cours (Leader/Modo uniquement)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+    data: new SlashCommandBuilder()
+        .setName('stop')
+        .setDescription('🛑 Arrête proprement l’entraînement vocal'),
 
-  async execute(interaction) {
-    const session = getSession(interaction.guildId);
+    async execute(interaction) {
+        const session = global.trainingSessions?.get(interaction.user.id);
 
-    if (!session) {
-      return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], ephemeral: true });
+        if (!session) {
+            return interaction.reply({
+                content: "❌ Aucune session d’entraînement active.",
+                ephemeral: true
+            });
+        }
+
+        // Stop audio player
+        stopAudio(session);
+
+        // Stop receiver
+        stopReceiver(session);
+
+        // Déconnexion vocale propre
+        try {
+            if (session.connection) {
+                session.connection.destroy();
+            }
+        } catch (err) {
+            console.error("[STOP] Erreur destruction connexion :", err);
+        }
+
+        // Suppression de la session
+        global.trainingSessions.delete(interaction.user.id);
+
+        return interaction.reply("🛑 Entraînement arrêté proprement !");
     }
-
-    const isLeader = hasRole(interaction.member, ROLE_LEADER);
-    const isModo   = hasRole(interaction.member, ROLE_MODO);
-    const isHost   = session.hostId === interaction.user.id;
-
-    if (!isLeader && !isModo && !isHost) {
-      return interaction.reply({
-        embeds: [errorEmbed('Seuls les **Leader** 👑, **Modo** 🛡️ ou l\'hôte peuvent arrêter la session.')],
-        ephemeral: true,
-      });
-    }
-
-    // Récupérer les IDs des chanteurs avant de supprimer la session
-    const singerIds = session.players.map(p => p.userId);
-
-    deleteSession(interaction.guildId);
-
-    // Réactiver les micros des chanteurs dans le salon vocal
-    try {
-      const voiceChannel = await findVoiceChannel(interaction.guild);
-      if (voiceChannel && singerIds.length > 0) {
-        await unmuteSingersOnly(interaction.guild, voiceChannel, singerIds);
-      }
-    } catch (e) {
-      console.warn('[Stop] Erreur démute salon vocal :', e.message);
-    }
-
-    return interaction.reply({
-      embeds: [successEmbed(
-        '🛑 Session arrêtée !\n\n' +
-        '🎙️ Les micros des **chanteurs** sont réactivés.\n' +
-        '_Le salon et l\'événement restent actifs._'
-      )],
-    });
-  },
 };
