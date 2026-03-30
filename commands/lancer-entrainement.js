@@ -1,91 +1,79 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const { playAudio } = require('../utils/audioPlayer');
-const { analyzeVoiceActivity } = require('../utils/voiceAnalyzer');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('lancer-test')
-        .setDescription('▶️ Démarrer la séquence d\'entraînement pré-connectée'),
+        .setDescription('▶️ Lance la séquence d’entraînement vocal'),
 
     async execute(interaction) {
         const session = global.trainingSessions?.get(interaction.user.id);
 
+        // Vérification session
         if (!session || !session.connection) {
-            return interaction.reply({ content: "❌ Session introuvable. Tape `/entrainement`.", ephemeral: true });
+            return interaction.reply({
+                content: "❌ Lance d’abord `/entrainement` pour initialiser la session.",
+                ephemeral: true
+            });
         }
 
-        const connection = session.connection;
-        // On vérifie si l'interaction est toujours valide
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.reply({ content: "🎤 Analyse de la session...", ephemeral: false });
+        // Vérification chansons
+        if (!session.songs || session.songs.length === 0) {
+            return interaction.reply({
+                content: "❌ Aucune chanson trouvée dans ta session.",
+                ephemeral: true
+            });
         }
 
-        try {
-            await entersState(connection, VoiceConnectionStatus.Ready, 5_000);
-        } catch (error) {
-            try { await interaction.followUp("⚠️ Connexion perdue. Relance `/entrainement`."); } catch(e){}
-            return;
-        }
+        await interaction.reply("🎤 Lancement de ton entraînement…");
 
+        // Lecture séquentielle
         for (let i = 0; i < session.songs.length; i++) {
-            const song = session.songs[i];
-            const parts = song.info.split('=');
-            const songName = parts[0].trim();
-            const songUrl = parts[1]?.trim();
+            const raw = session.songs[i];
 
-            // SÉCURITÉ IA (Point n°4) : Vérifier l'URL avant de lancer
-            if (!songUrl) {
-                await interaction.channel.send(`⚠️ URL manquante pour **${songName}**, passage à la suivante.`);
-                continue;
-            }
+            // Format attendu : "Titre + Artiste = URL"
+            const fullText = typeof raw === "object" ? raw.info : raw;
+            const [infoPart, urlPart] = fullText.split('=').map(s => s.trim());
 
-            const startEmbed = new EmbedBuilder()
-                .setColor(0xFF69B4)
-                .setTitle(`Musique ${i + 1}/${session.songs.length}`)
-                .setDescription(`Titre : **${songName}**\nPréparation du flux...`);
-            
-            await interaction.channel.send({ embeds: [startEmbed] });
+            const songName = infoPart.split('+')[0].trim();
+            const youtubeUrl = urlPart;
 
+            // Reset scoring
             session.precisionTicks = 0;
-            let voiceStream = null;
-            
-            try {
-                // On tente la souscription (Point n°2)
-                voiceStream = connection.receiver.subscribe(interaction.user.id);
-                analyzeVoiceActivity(voiceStream, () => {
-                    session.precisionTicks++; 
-                });
-            } catch (e) {
-                console.error("Erreur micro:", e.message);
-            }
 
- // --- LECTURE AUDIO AVEC LE MODE PERSISTANT (true) ---
-await new Promise((resolve) => {
-    playAudio(voiceChannel, songUrl, () => {
-        if (voiceStream?.destroy) voiceStream.destroy();
-        resolve();
-    }, (err) => {
-        console.error("Erreur PlayAudio:", err);
-        if (voiceStream?.destroy) voiceStream.destroy();
-        resolve();
-    }, interaction.user.id, true); // <--- Le "true" ici active la connexion persistante
-});
+            // Embed d’annonce
+            const embedStart = new EmbedBuilder()
+                .setColor(0xFF69B4)
+                .setTitle(`🎶 Entraînement — Musique ${i + 1}/${session.songs.length}`)
+                .setDescription(`Titre : **${songName}**\nChante dès que tu es prêt !`);
 
-            // SCORE
-            const score = Math.min(Math.round((session.precisionTicks / 400) * 100), 100);
-            const scoreEmbed = new EmbedBuilder()
-                .setColor(score > 50 ? 0x57F287 : 0xFFAA00)
-                .setTitle(`📊 Score : ${songName}`)
-                .setDescription(`Précision : **${score}%**`);
-            
-            await interaction.channel.send({ embeds: [scoreEmbed] });
+            await interaction.channel.send({ embeds: [embedStart] });
 
+            // Lecture audio
+            await new Promise(resolve => {
+                playAudio(session, youtubeUrl, resolve, resolve);
+            });
+
+            // Calcul du score
+            const score = Math.min(
+                Math.round((session.precisionTicks / 350) * 100),
+                100
+            );
+
+            // Embed résultat
+            const embedScore = new EmbedBuilder()
+                .setColor(score >= 50 ? 0x57F287 : 0xED4245)
+                .setTitle(`📊 Résultat : ${songName}`)
+                .setDescription(`Score : **${score}%**`);
+
+            await interaction.channel.send({ embeds: [embedScore] });
+
+            // Petite pause entre les musiques
             if (i < session.songs.length - 1) {
-                await new Promise(r => setTimeout(r, 4000));
+                await new Promise(r => setTimeout(r, 3000));
             }
         }
 
-        await interaction.channel.send("🎉 **Séquence terminée !**");
+        await interaction.channel.send("🎉 Entraînement terminé !");
     }
 };
