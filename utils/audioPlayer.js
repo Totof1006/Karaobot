@@ -7,29 +7,32 @@ const {
   entersState,
   StreamType 
 } = require('@discordjs/voice');
-const { AUDIO_CONNECT_TIMEOUT_MS } = require('./constants');
 const play = require('play-dl');
+const { AUDIO_CONNECT_TIMEOUT_MS } = require('./constants');
 
-// On garde ta gestion de cookies
+// --- CONFIGURATION YOUTUBE ---
 async function activateYoutubeCookies() {
     try {
         await play.setToken({ youtube: { cookie: "/data/youtube_cookies.txt" } });
-        console.log("✅ [YouTube] Cookies activés.");
-    } catch (err) { console.error("❌ [YouTube] Erreur cookies:", err.message); }
+        console.log("✅ [AudioPlayer] YouTube Authentifié.");
+    } catch (err) { console.error("❌ [AudioPlayer] Erreur Cookies:", err.message); }
 }
 activateYoutubeCookies();
 
-const { setupUserReceiver } = require('./voiceReceiver');
 const activeConnections = new Map();
 
 /**
- * Jouer un son sans détruire la connexion à chaque fois
+ * Jouer de l'audio de façon stable
+ * @param {VoiceChannel} voiceChannel - Le salon vocal
+ * @param {string} audioUrl - Lien YouTube ou direct
+ * @param {Function} onFinish - Callback de fin
+ * @param {boolean} persistConnection - Si TRUE, ne détruit pas la connexion à la fin
  */
-async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = null) {
+async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = null, persistConnection = false) {
   const guildId = voiceChannel.guild.id;
   let active = activeConnections.get(guildId);
 
-  // 1. GESTION DE LA CONNEXION (On ne rejoint que si nécessaire)
+  // 1. REUTILISATION OU CREATION DE LA CONNEXION
   if (!active || active.connection.state.status === VoiceConnectionStatus.Destroyed) {
     const connection = joinVoiceChannel({
       channelId: voiceChannel.id,
@@ -45,22 +48,16 @@ async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = n
       connection.subscribe(active.player);
       activeConnections.set(guildId, active);
     } catch (err) {
-      connection.destroy();
-      if (onError) onError(new Error('Connexion impossible.'));
+      if (connection) connection.destroy();
+      if (onError) onError(err);
       return;
     }
   }
 
-  // 2. STOPPER LA MUSIQUE PRÉCÉDENTE MAIS GARDER LA CONNEXION
-  active.player.stop(true);
-
-  // 3. ATTACHE DU RECEIVER (Une seule fois par session si possible)
-  if (singerId && !active.receiver) {
-    active.receiver = setupUserReceiver(active.connection, singerId);
-  }
-
-  // 4. PRÉPARATION DE LA RESSOURCE
+  // 2. LECTURE DE LA RESSOURCE
   try {
+    active.player.stop(true); // Arrête le morceau précédent s'il y en a un
+    
     let resource;
     if (play.yt_validate(audioUrl)) {
       const stream = await play.stream(audioUrl, { quality: 1, discordPlayerCompatibility: true });
@@ -69,41 +66,35 @@ async function playAudio(voiceChannel, audioUrl, onFinish, onError, singerId = n
       resource = createAudioResource(audioUrl, { inputType: StreamType.Arbitrary });
     }
 
-    // 5. LECTURE
     active.player.play(resource);
 
-    // Nettoyage des anciens écouteurs pour éviter les fuites de mémoire
+    // 3. GESTION DE LA FIN (Événements uniques pour éviter les bugs)
     active.player.removeAllListeners(AudioPlayerStatus.Idle);
-    active.player.removeAllListeners('error');
-
-    active.player.on(AudioPlayerStatus.Idle, () => {
+    active.player.once(AudioPlayerStatus.Idle, () => {
+      if (!persistConnection) {
+        stopAudio(guildId); // Mode événement : on quitte
+      }
       if (onFinish) onFinish();
     });
 
-    active.player.on('error', err => {
-      console.error('[AudioPlayer] Erreur:', err.message);
-      if (onError) onError(err);
-    });
-
   } catch (err) {
-    console.error('[AudioPlayer] Erreur ressource:', err);
+    console.error('[AudioPlayer] Erreur flux:', err);
     if (onError) onError(err);
   }
 }
 
 /**
- * Arrête tout et QUITTE le salon (à utiliser uniquement à la fin du test ou /stop)
+ * Arrêt total et déconnexion
  */
 function stopAudio(guildId) {
   const active = activeConnections.get(guildId);
   if (!active) return;
-  
   try {
     active.player.stop(true);
     if (active.connection.state.status !== VoiceConnectionStatus.Destroyed) {
       active.connection.destroy();
     }
-  } catch (e) { console.error("[AudioPlayer] Erreur stop:", e.message); }
+  } catch (e) {}
   activeConnections.delete(guildId);
 }
 
