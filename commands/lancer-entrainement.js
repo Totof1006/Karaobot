@@ -2,91 +2,53 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { playAudio } = require('../utils/audioPlayer');
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('lancer-test')
-        .setDescription('▶️ Lance la séquence d’entraînement vocal'),
+    data: new SlashCommandBuilder().setName('lancer-test').setDescription('▶️ Lance la séquence'),
 
     async execute(interaction) {
-        // --- 1. VÉRIFICATION DE LA SESSION ---
         const session = global.trainingSessions?.get(interaction.user.id);
-        
-        // On récupère la connexion existante
-        const voiceConnection = session?.connection || require('@discordjs/voice').getVoiceConnection(interaction.guild.id);
+        if (!session) return interaction.reply({ content: "❌ Session introuvable.", ephemeral: true });
 
-        if (!session || !voiceConnection) {
-            return interaction.reply({
-                content: "❌ Session introuvable. Tape `/entrainement` d'abord.",
-                ephemeral: true
-            });
-        }
+        await interaction.reply("🎤 Analyse et lancement des pistes...");
 
-        // On s'assure que la connexion est bien liée à la session
-        session.connection = voiceConnection;
-
-        if (!session.songs || session.songs.length === 0) {
-            return interaction.reply({
-                content: "❌ Aucune chanson trouvée.",
-                ephemeral: true
-            });
-        }
-
-        await interaction.reply("🎤 Lancement de ton entraînement…");
-
-        // --- 2. BOUCLE DE LECTURE ---
         for (let i = 0; i < session.songs.length; i++) {
             const rawText = session.songs[i];
-            
-            // Initialisation des variables par défaut pour éviter le "undefined"
-            let songName = `Musique ${i + 1}`;
+            let songName = `Piste ${i + 1}`;
             let targetUrl = "";
 
-            // Découpage intelligent : supporte "Nom = URL" ou juste "URL"
+            // Nettoyage complet pour éviter le "undefined" des logs Railway
             if (rawText.includes('=')) {
                 const parts = rawText.split('=');
                 songName = parts[0].trim();
-                targetUrl = parts[1]?.trim();
+                targetUrl = parts.slice(1).join('=').trim(); // Gère les URL contenant des '='
             } else {
                 targetUrl = rawText.trim();
             }
 
-            // SÉCURITÉ : Si l'URL est vide ou invalide, on passe à la suite sans crash
+            // On vérifie le résultat avant d'appeler l'audio
             if (!targetUrl || !targetUrl.startsWith('http')) {
-                await interaction.channel.send(`⚠️ Lien ignoré (invalide) : **${songName}**`);
+                await interaction.channel.send(`❌ Erreur format sur : **${rawText}** (URL non détectée)`);
                 continue;
             }
 
-            // Reset du score pour cette chanson
             session.precisionTicks = 0;
+            await interaction.channel.send({ embeds: [new EmbedBuilder().setTitle(`🎶 ${songName}`).setColor(0xFF69B4)] });
 
-            // --- 3. ANNONCE ---
-            const embedStart = new EmbedBuilder()
-                .setColor(0xFF69B4)
-                .setTitle(`🎶 Musique ${i + 1}/${session.songs.length}`)
-                .setDescription(`Titre : **${songName}**\n\n*Préparez-vous !*`);
-
-            await interaction.channel.send({ embeds: [embedStart] });
-
-            // --- 4. LECTURE (Synchronisée avec audioPlayer.js) ---
+            // On attend la fin réelle
             await new Promise(resolve => {
-                // On utilise la fonction universelle qui gère YT/SoundCloud/MP3
                 playAudio(session, targetUrl, resolve, (err) => {
-                    console.error(`Erreur sur ${songName}:`, err.message);
-                    resolve(); // On resolve quand même pour ne pas bloquer la boucle for
+                    interaction.channel.send(`⚠️ Erreur de lecture pour **${songName}**`);
+                    resolve();
                 });
             });
 
-            // --- 5. CALCUL ET AFFICHAGE DU SCORE ---
             const score = Math.min(Math.round((session.precisionTicks / 350) * 100), 100);
-
-            const resultEmbed = new EmbedBuilder()
-                .setColor(score >= 50 ? 0x57F287 : 0xED4245)
-                .setTitle(`📊 Résultat : ${songName}`)
-                .setDescription(`Précision vocale : **${score}%**`);
-
-            await interaction.channel.send({ embeds: [resultEmbed] });
+            await interaction.channel.send({ 
+                embeds: [new EmbedBuilder()
+                    .setTitle(`📊 Résultat : ${songName}`)
+                    .setDescription(`Précision : **${score}%**`)
+                    .setColor(score >= 50 ? 0x57F287 : 0xED4245)] 
+            });
         }
-
-        // --- 6. FIN ---
-        await interaction.channel.send("🎉 **Séquence d'entraînement terminée !**");
+        await interaction.channel.send("🎉 **Séquence terminée.**");
     }
 };
