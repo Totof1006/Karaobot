@@ -87,8 +87,7 @@ module.exports = {
             //if (i < session.songs.length - 1) {
             //await new Promise(r => setTimeout(r, 3000));
             }
-        }
-
+        
         await interaction.channel.send("🎉 Entraînement terminé !");
     }
 };
