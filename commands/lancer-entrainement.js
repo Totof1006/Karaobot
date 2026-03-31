@@ -7,8 +7,7 @@ module.exports = {
         .setDescription('▶️ Lance la séquence d’entraînement vocal'),
 
     async execute(interaction) {
-        const session = global.trainingSessions?.get(interaction.user.id);
-
+        
         // Vérification session
         const session = global.trainingSessions?.get(interaction.user.id);
 
