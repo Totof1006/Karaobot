@@ -6,24 +6,29 @@ async function playAudio(session, input, onFinish) {
         if (!input || input.trim().length === 0) return onFinish();
 
         if (!session.player) {
-            session.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+            session.player = createAudioPlayer({
+                behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+            });
             if (session.connection) session.connection.subscribe(session.player);
         }
 
         let urlToPlay = input.trim();
 
-        // RECHERCHE AUTOMATIQUE (C'est ça qui manquait !)
+        // RECHERCHE AUTOMATIQUE : Si ce n'est pas un lien, on cherche sur YouTube
         if (!urlToPlay.startsWith('http')) {
-            console.log(`🔎 Recherche YouTube : ${urlToPlay}`);
+            console.log(`🔎 Recherche YouTube pour : ${urlToPlay}`);
             const results = await play.search(urlToPlay, { limit: 1 });
+            
             if (results && results.length > 0) {
-                urlToPlay = results[0].url; // On prend le lien trouvé par le bot
+                urlToPlay = results[0].url; // On extrait l'URL du résultat
+                console.log(`✅ Trouvé : ${results[0].title}`);
             } else {
-                console.error("❌ Aucun résultat trouvé sur YouTube.");
+                console.error("❌ Aucun résultat trouvé.");
                 return onFinish();
             }
         }
 
+        // Lecture du flux (compatible avec les nouvelles normes Discord)
         const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
         const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
@@ -32,11 +37,11 @@ async function playAudio(session, input, onFinish) {
 
         session.player.once(AudioPlayerStatus.Idle, () => onFinish());
         session.player.once('error', (err) => {
-            console.error("Erreur de lecture :", err.message);
+            console.error("[AudioPlayer] Erreur :", err.message);
             onFinish();
         });
     } catch (e) {
-        console.error("Erreur critique AudioPlayer :", e.message);
+        console.error("[AudioPlayer] Erreur critique :", e.message);
         onFinish();
     }
 }
