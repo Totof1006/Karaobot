@@ -1,81 +1,72 @@
-const {
-    createAudioPlayer,
-    createAudioResource,
-    AudioPlayerStatus,
-    StreamType
+const { 
+    createAudioPlayer, 
+    createAudioResource, 
+    AudioPlayerStatus, 
+    NoSubscriberBehavior 
 } = require('@discordjs/voice');
-
 const play = require('play-dl');
 
 /**
- * Lecture audio PRO
- * - Utilise la connexion persistante stockée dans session.connection
- * - Utilise un player unique stocké dans session.player
- * - Ne détruit jamais la connexion
+ * Lecture audio UNIVERSELLE
+ * Gère YouTube, SoundCloud, Spotify (via recherche YT) et liens directs.
  */
 async function playAudio(session, audioUrl, onFinish, onError) {
     try {
-        // Player unique par session
-        let player = session.player;
-        if (!player) {
-            player = createAudioPlayer();
-            session.player = player;
-
-            // On abonne le player à la connexion persistante
-            session.connection.subscribe(player);
+        // 1. Sécurité anti-undefined
+        if (!audioUrl || typeof audioUrl !== 'string') {
+            return onError(new Error("URL invalide ou non définie"));
         }
 
+        // 2. Récupération ou création du Player unique
+        if (!session.player) {
+            session.player = createAudioPlayer({
+                behaviors: { noSubscriber: NoSubscriberBehavior.Play }
+            });
+            // On l'abonne à la connexion de la session
+            if (session.connection) session.connection.subscribe(session.player);
+        }
+
+        const player = session.player;
         let resource;
 
-        // Lecture YouTube via play-dl
-        if (play.yt_validate(audioUrl)) {
-            const stream = await play.stream(audioUrl, {
-                quality: 1,
-                discordPlayerCompatibility: true
-            });
-
-            resource = createAudioResource(stream.stream, {
-                inputType: stream.type
-            });
-        } else {
-            // Lecture d’un lien direct
-            resource = createAudioResource(audioUrl, {
-                inputType: StreamType.Arbitrary
-            });
-        }
-
-        player.play(resource);
-
-        // Quand la musique se termine
-        player.once(AudioPlayerStatus.Idle, () => {
-            if (onFinish) onFinish();
+        // 3. LOGIQUE UNIVERSELLE (Détection automatique)
+        // play-dl.stream gère presque tout tout seul si on lui laisse faire
+        let stream = await play.stream(audioUrl, {
+            quality: 1,
+            discordPlayerCompatibility: true
         });
 
-        // Gestion des erreurs
+        resource = createAudioResource(stream.stream, {
+            inputType: stream.type,
+            inlineVolume: true
+        });
+
+        // 4. Lancement
+        player.play(resource);
+
+        // 5. GESTION DES ÉVÉNEMENTS (Nettoyage avant de réécouter)
+        player.removeAllListeners(AudioPlayerStatus.Idle);
+        player.removeAllListeners('error');
+
+        player.once(AudioPlayerStatus.Idle, () => {
+            onFinish();
+        });
+
         player.once('error', err => {
-            console.error("[AudioPlayer] Erreur :", err);
-            if (onError) onError(err);
+            console.error("[AudioPlayer] Erreur de lecture :", err.message);
+            player.stop();
+            onError(err);
         });
 
     } catch (err) {
-        console.error("[AudioPlayer] Erreur globale :", err);
-        if (onError) onError(err);
+        console.error("[AudioPlayer] Erreur critique :", err.message);
+        onError(err);
     }
 }
 
-/**
- * Stop PRO
- * - Arrête la musique
- * - Ne détruit PAS la connexion
- * - Ne détruit PAS le receiver
- */
 function stopAudio(session) {
-    try {
-        if (session.player) {
-            session.player.stop(true);
-        }
-    } catch (e) {
-        console.error("[AudioPlayer] stopAudio error:", e);
+    if (session.player) {
+        session.player.stop(true);
     }
 }
 
