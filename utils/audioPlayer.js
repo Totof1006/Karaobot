@@ -1,35 +1,35 @@
 const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
 const play = require('play-dl');
 
-async function playAudio(session, url, onFinish, onError) {
+async function playAudio(session, input, onFinish, onError) {
     try {
-        if (!url || typeof url !== 'string' || !url.startsWith('http')) {
-            return onFinish(); // On passe à la suite si l'URL est cassée
-        }
+        if (!input || input.trim().length === 0) return onFinish();
 
         if (!session.player) {
             session.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
             if (session.connection) session.connection.subscribe(session.player);
         }
 
-        let stream;
-        // GESTION SPOTIFY : Si c'est un lien Spotify, on cherche sur YouTube
-        if (url.includes('spotify.com')) {
-            const searchResults = await play.search(url, { limit: 1, source: { youtube: 'video' } });
-            if (searchResults.length > 0) {
-                stream = await play.stream(searchResults[0].url, { discordPlayerCompatible: true });
-            } else {
-                throw new Error("Impossible de trouver cette musique Spotify sur YouTube.");
+        let songInfo;
+        // Si l'entrée n'est pas un lien HTTP, on fait une recherche YouTube
+        if (!input.startsWith('http')) {
+            console.log(`🔎 Recherche YouTube pour : ${input}`);
+            const searchResults = await play.search(input, { limit: 1, source: { youtube: 'video' } });
+            
+            if (searchResults.length === 0) {
+                console.error("❌ Aucun résultat trouvé.");
+                return onFinish();
             }
-        } else {
-            stream = await play.stream(url, { discordPlayerCompatible: true });
+            songInfo = searchResults[0];
         }
 
+        // On génère le flux à partir de l'URL trouvée ou fournie
+        const urlToPlay = songInfo ? songInfo.url : input;
+        const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
         const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
         session.player.removeAllListeners(AudioPlayerStatus.Idle);
         session.player.removeAllListeners('error');
-
         session.player.play(resource);
 
         session.player.once(AudioPlayerStatus.Idle, () => onFinish());
@@ -37,6 +37,7 @@ async function playAudio(session, url, onFinish, onError) {
             console.error("[AudioPlayer] Erreur :", err.message);
             onFinish();
         });
+
     } catch (e) {
         console.error("[AudioPlayer] Erreur critique :", e.message);
         onFinish();
