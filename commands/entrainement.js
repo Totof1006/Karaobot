@@ -10,7 +10,6 @@ const {
     ChannelType,
     PermissionFlagsBits 
 } = require('discord.js');
-
 const { joinVoiceChannel, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 const { setupUserReceiver } = require('../utils/voiceReceiver');
 
@@ -20,8 +19,7 @@ module.exports = {
         .setDescription('🎤 Utilise le salon d\'entraînement disponible'),
 
     async execute(interaction) {
-
-        // ── 1. CIBLAGE DU SALON ─────────────────────────────────────────────
+        // 1. CIBLAGE DU SALON
         const channelName = 'Entraînement 1';
         const channel = interaction.guild.channels.cache.find(c => 
             c.name === channelName && c.type === ChannelType.GuildVoice
@@ -31,44 +29,29 @@ module.exports = {
             return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, ephemeral: true });
         }
 
-        // Vérification si occupé
         if (channel.members.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
             return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", ephemeral: true });
         }
 
-        // ── 2. MODAL ────────────────────────────────────────────────────────
+        // 2. MODAL
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Entraînement');
 
         modal.addComponents(
             new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('chanson1')
-                    .setLabel('Musique 1 (Nom = URL)')
-                    .setPlaceholder('Ex: Lose Yourself = https://youtube.com/...')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
+                new TextInputBuilder().setCustomId('chanson1').setLabel('Musique 1 (Nom = URL)').setPlaceholder('Ex: Lose Yourself = https://youtube.com/...').setStyle(TextInputStyle.Short).setRequired(true)
             ),
             new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('chanson2')
-                    .setLabel('Musique 2')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(false)
+                new TextInputBuilder().setCustomId('chanson2').setLabel('Musique 2').setStyle(TextInputStyle.Short).setRequired(false)
             ),
             new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('chanson3')
-                    .setLabel('Musique 3')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(false)
+                new TextInputBuilder().setCustomId('chanson3').setLabel('Musique 3').setStyle(TextInputStyle.Short).setRequired(false)
             )
         );
 
         await interaction.showModal(modal);
 
-        // ── 3. VALIDATION ───────────────────────────────────────────────────
         const submitted = await interaction.awaitModalSubmit({
             time: 60000,
             filter: i => i.customId === `modal_train_${interaction.user.id}`
@@ -83,30 +66,27 @@ module.exports = {
             { info: submitted.fields.getTextInputValue('chanson3') || "" }
         ].filter(s => s.info.trim() !== "");
 
-        // ── 4. PERMISSIONS ──────────────────────────────────────────────────
-        await channel.permissionOverwrites.set([
-            { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] },
-            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.ManageMessages] }
-        ]);
+        // ── 3. PERMISSIONS (ON DONNE L'ACCÈS TOUT DE SUITE) ──────────────────
+        // Comme dans ton ancien code, on assure l'accès avant toute chose
+        try {
+            await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { ViewChannel: false, Connect: false });
+            await channel.permissionOverwrites.edit(interaction.user.id, { ViewChannel: true, Connect: true, Speak: true, Stream: true });
+            await channel.permissionOverwrites.edit(interaction.client.user.id, { ViewChannel: true, Connect: true, Speak: true, ManageMessages: true });
+        } catch (e) { console.error("Erreur perms:", e); }
 
-        // ── 5. CRÉATION DE LA SESSION ───────────────────────────────────────
+        // ── 4. INITIALISATION SESSION ───────────────────────────────────────
         if (!global.trainingSessions) global.trainingSessions = new Map();
-
         const session = {
             userId: interaction.user.id,
             channelId: channel.id,
             songs: songs,
             connection: null,
-            player: null,
-            receiverStream: null,
             precisionTicks: 0
         };
-
         global.trainingSessions.set(interaction.user.id, session);
 
-        // ── 6. CONNEXION VOCALE + RECEIVER PRO ──────────────────────────────
-        const voiceConnection = joinVoiceChannel({
+        // ── 5. CONNEXION VOCALE (SÉCURISÉE) ──────────────────────────────────
+        const connection = joinVoiceChannel({
             channelId: channel.id,
             guildId: interaction.guild.id,
             adapterCreator: interaction.guild.voiceAdapterCreator,
@@ -115,16 +95,15 @@ module.exports = {
         });
 
         try {
-            await entersState(voiceConnection, VoiceConnectionStatus.Ready, 5000);
+            await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+            session.connection = connection;
+            // On prépare l'écoute du micro
+            setupUserReceiver(session, interaction.user.id);
         } catch (err) {
-            console.error("[Entrainement] Connexion impossible :", err);
-            return submitted.editReply({ content: "❌ Impossible de rejoindre le salon vocal." });
+            console.error("Le bot n'a pas pu rejoindre, mais l'utilisateur a ses accès.");
         }
 
-        session.connection = voiceConnection;
-        setupUserReceiver(session, interaction.user.id);
-
-        // ── 7. INTERFACE ────────────────────────────────────────────────────
+        // ── 6. INTERFACE ────────────────────────────────────────────────────
         const buttons = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier n°1').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier n°2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
@@ -133,7 +112,7 @@ module.exports = {
 
         await channel.send({ 
             content: `<@${interaction.user.id}>`,
-            embeds: [new EmbedBuilder().setTitle("🎤 Entraînement Ouvert").setDescription("Utilise `/lancer-test` quand tu es prêt.")],
+            embeds: [new EmbedBuilder().setTitle("🎤 Entraînement Ouvert").setDescription("Le salon est à toi ! Lance `/lancer-test` quand tu es prêt.")],
             components: [buttons]
         });
 
