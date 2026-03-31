@@ -79,8 +79,8 @@ module.exports = {
             await interaction.channel.send({ embeds: [embedScore] });
 
             // Petite pause entre les musiques
-            if (i < session.songs.length - 1) {
-                await new Promise(r => setTimeout(r, 3000));
+            //if (i < session.songs.length - 1) {
+            //await new Promise(r => setTimeout(r, 3000));
             }
         }
 
