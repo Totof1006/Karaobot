@@ -10,8 +10,9 @@ async function playAudio(session, input, onFinish, onError) {
             if (session.connection) session.connection.subscribe(session.player);
         }
 
-        let songInfo;
-        // Si l'entrée n'est pas un lien HTTP, on fait une recherche YouTube
+        let finalUrl = input;
+
+        // Si ce n'est pas un lien, on cherche et on extrait l'URL
         if (!input.startsWith('http')) {
             console.log(`🔎 Recherche YouTube pour : ${input}`);
             const searchResults = await play.search(input, { limit: 1, source: { youtube: 'video' } });
@@ -20,21 +21,24 @@ async function playAudio(session, input, onFinish, onError) {
                 console.error("❌ Aucun résultat trouvé.");
                 return onFinish();
             }
-            songInfo = searchResults[0];
+            
+            // CORRECTIF : On récupère l'URL brute de la vidéo trouvée
+            finalUrl = searchResults[0].url; 
+            console.log(`✅ Trouvé : ${finalUrl}`);
         }
 
-        // On génère le flux à partir de l'URL trouvée ou fournie
-        const urlToPlay = songInfo ? songInfo.url : input;
-        const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
+        // Création du flux avec l'URL propre
+        const stream = await play.stream(finalUrl, { discordPlayerCompatible: true });
         const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
         session.player.removeAllListeners(AudioPlayerStatus.Idle);
         session.player.removeAllListeners('error');
+        
         session.player.play(resource);
 
         session.player.once(AudioPlayerStatus.Idle, () => onFinish());
         session.player.once('error', (err) => {
-            console.error("[AudioPlayer] Erreur :", err.message);
+            console.error("[AudioPlayer] Erreur de lecture :", err.message);
             onFinish();
         });
 
