@@ -37,21 +37,29 @@ module.exports = {
         // Lecture séquentielle
         for (let i = 0; i < session.songs.length; i++) {
             const raw = session.songs[i];
+            const fullText = typeof raw === "object" ? raw.info : raw;
 
-            // Format attendu : "Titre + Artiste = URL"
-           const fullText = typeof raw === "object" ? raw.info : raw;
-            if (!fullText.includes('=')) continue; // Sécurité si ligne mal remplie
+            // --- CORRECTION ICI : Extraction propre de l'URL ---
+            if (!fullText.includes('=')) {
+                console.error(`Ligne mal formatée : ${fullText}`);
+                continue;
+            }
 
-            const [infoPart, urlPart] = fullText.split('=').map(s => s.trim());
-            
-            // Si pas de +, on prend tout le infoPart comme nom
-            const songName = infoPart.includes('+') ? infoPart.split('+')[0].trim() : infoPart;
-            const youtubeUrl = urlPart;
+            const parts = fullText.split('=');
+            const songNamePart = parts[0].trim();
+            const youtubeUrl = parts[1]?.trim(); // On récupère ce qui est APRES le =
 
-            // Reset scoring
+            if (!youtubeUrl || !youtubeUrl.startsWith('http')) {
+                console.error(`URL invalide pour ${songNamePart} : ${youtubeUrl}`);
+                await interaction.channel.send(`⚠️ Impossible de lire l'URL pour : ${songNamePart}`);
+                continue;
+            }
+
+            const songName = songNamePart.split('+')[0].trim();
+            // ------------------------------------------------
+
             session.precisionTicks = 0;
 
-            // Embed d’annonce
             const embedStart = new EmbedBuilder()
                 .setColor(0xFF69B4)
                 .setTitle(`🎶 Entraînement — Musique ${i + 1}/${session.songs.length}`)
@@ -61,22 +69,19 @@ module.exports = {
 
             // Lecture audio
             await new Promise(resolve => {
+                // On passe bien l'URL nettoyée
                 playAudio(session, youtubeUrl, resolve, resolve);
             });
 
             // Calcul du score
-            const score = Math.min(
-                Math.round((session.precisionTicks / 350) * 100),
-                100
-            );
+            const score = Math.min(Math.round((session.precisionTicks / 350) * 100), 100);
 
-            // Embed résultat
             const embedScore = new EmbedBuilder()
                 .setColor(score >= 50 ? 0x57F287 : 0xED4245)
                 .setTitle(`📊 Résultat : ${songName}`)
                 .setDescription(`Score : **${score}%**`);
 
-            await interaction.channel.send({ embeds: [embedScore] });
+            await interaction.channel.send({ embeds: [scoreEmbed] });
 
             // Petite pause entre les musiques
             //if (i < session.songs.length - 1) {
