@@ -10,7 +10,7 @@ const {
     ChannelType,
     PermissionFlagsBits 
 } = require('discord.js');
-const { joinVoiceChannel, entersState, VoiceConnectionStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, entersState, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
 const { setupUserReceiver } = require('../utils/voiceReceiver');
 
 module.exports = {
@@ -29,8 +29,12 @@ module.exports = {
             return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, ephemeral: true });
         }
 
-        if (channel.members.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
-            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", ephemeral: true });
+        // --- CORRECTION OCCUPATION ---
+        // On filtre pour ne compter que les vrais utilisateurs (pas les bots)
+        const humanMembers = channel.members.filter(m => !m.user.bot);
+
+        if (humanMembers.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
+            return interaction.reply({ content: "⚠️ Le salon est déjà occupé par un autre chanteur.", ephemeral: true });
         }
 
         // 2. MODAL
@@ -66,16 +70,16 @@ module.exports = {
             { info: submitted.fields.getTextInputValue('chanson3') || "" }
         ].filter(s => s.info.trim() !== "");
 
-        // ── 3. PERMISSIONS (ON DONNE L'ACCÈS TOUT DE SUITE) ──────────────────
-        // Comme dans ton ancien code, on assure l'accès avant toute chose
+        // 3. PERMISSIONS
         try {
             await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { ViewChannel: false, Connect: false });
             await channel.permissionOverwrites.edit(interaction.user.id, { ViewChannel: true, Connect: true, Speak: true, Stream: true });
             await channel.permissionOverwrites.edit(interaction.client.user.id, { ViewChannel: true, Connect: true, Speak: true, ManageMessages: true });
         } catch (e) { console.error("Erreur perms:", e); }
 
-        // ── 4. INITIALISATION SESSION ───────────────────────────────────────
+        // 4. INITIALISATION SESSION
         if (!global.trainingSessions) global.trainingSessions = new Map();
+        
         const session = {
             userId: interaction.user.id,
             channelId: channel.id,
@@ -85,25 +89,28 @@ module.exports = {
         };
         global.trainingSessions.set(interaction.user.id, session);
 
-        // ── 5. CONNEXION VOCALE (SÉCURISÉE) ──────────────────────────────────
-        const connection = joinVoiceChannel({
-            channelId: channel.id,
-            guildId: interaction.guild.id,
-            adapterCreator: interaction.guild.voiceAdapterCreator,
-            selfDeaf: false,
-            selfMute: false
-        });
+        // 5. CONNEXION VOCALE (RÉUTILISATION SI DÉJÀ PRÉSENT)
+        let connection = getVoiceConnection(interaction.guild.id);
+
+        if (!connection || connection.joinConfig.channelId !== channel.id) {
+            connection = joinVoiceChannel({
+                channelId: channel.id,
+                guildId: interaction.guild.id,
+                adapterCreator: interaction.guild.voiceAdapterCreator,
+                selfDeaf: false,
+                selfMute: false
+            });
+        }
 
         try {
             await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
             session.connection = connection;
-            // On prépare l'écoute du micro
             setupUserReceiver(session, interaction.user.id);
         } catch (err) {
-            console.error("Le bot n'a pas pu rejoindre, mais l'utilisateur a ses accès.");
+            console.error("Erreur connexion vocale:", err);
         }
 
-        // ── 6. INTERFACE ────────────────────────────────────────────────────
+        // 6. INTERFACE
         const buttons = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`check_train_1_${interaction.user.id}`).setLabel('Vérifier n°1').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`check_train_2_${interaction.user.id}`).setLabel('Vérifier n°2').setStyle(ButtonStyle.Primary).setDisabled(songs.length < 2),
