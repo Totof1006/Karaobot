@@ -19,13 +19,13 @@ module.exports = {
 
         if (!channel) return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, ephemeral: true });
 
-        // On ignore le bot pour la vérification d'occupation
+        // Vérification d'occupation (ignore le bot)
         const humanMembers = channel.members.filter(m => !m.user.bot);
         if (humanMembers.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
             return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", ephemeral: true });
         }
 
-        // --- 1. AFFICHAGE DU MODAL ---
+        // --- 1. MODAL ---
         const modal = new ModalBuilder().setCustomId(`modal_train_${interaction.user.id}`).setTitle('Inscription Entraînement');
         modal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('chanson1').setLabel('Musique 1 (Nom = URL)').setStyle(TextInputStyle.Short).setRequired(true)),
@@ -39,28 +39,35 @@ module.exports = {
         if (!submitted) return;
         await submitted.deferReply({ ephemeral: true });
 
+        // --- 2. STOCKAGE DES MUSIQUES (IMPORTANT : FORMAT SIMPLE) ---
+        // On stocke directement le texte pour éviter les erreurs "undefined"
         const songs = [
-            { info: submitted.fields.getTextInputValue('chanson1') },
-            { info: submitted.fields.getTextInputValue('chanson2') || "" },
-            { info: submitted.fields.getTextInputValue('chanson3') || "" }
-        ].filter(s => s.info.trim() !== "");
+            submitted.fields.getTextInputValue('chanson1'),
+            submitted.fields.getTextInputValue('chanson2') || "",
+            submitted.fields.getTextInputValue('chanson3') || ""
+        ].filter(s => s.trim() !== "");
 
-        // --- 2. PERMISSIONS (AVANT LA CONNEXION) ---
-        // On donne l'accès tout de suite, même si le vocal bug, l'utilisateur pourra entrer.
+        // --- 3. PERMISSIONS ---
         try {
             await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { ViewChannel: false, Connect: false });
             await channel.permissionOverwrites.edit(interaction.user.id, { ViewChannel: true, Connect: true, Speak: true, Stream: true });
             await channel.permissionOverwrites.edit(interaction.client.user.id, { ViewChannel: true, Connect: true, Speak: true, ManageMessages: true });
         } catch (e) { console.error("Erreur Perms:", e.message); }
 
-        // --- 3. CRÉATION SESSION ---
+        // --- 4. SESSION ET CONNEXION ---
         if (!global.trainingSessions) global.trainingSessions = new Map();
-        const session = { userId: interaction.user.id, channelId: channel.id, songs: songs, connection: null, precisionTicks: 0 };
+        
+        const session = { 
+            userId: interaction.user.id, 
+            channelId: channel.id, 
+            songs: songs, // Tableau de strings simples
+            connection: null, 
+            player: null, // Sera initialisé par l'audioPlayer
+            precisionTicks: 0 
+        };
         global.trainingSessions.set(interaction.user.id, session);
 
-        // --- 4. CONNEXION VOCALE (SÉCURISÉE CONTRE L'ABORT_ERR) ---
         let connection = getVoiceConnection(interaction.guild.id);
-
         if (!connection || connection.joinConfig.channelId !== channel.id) {
             connection = joinVoiceChannel({
                 channelId: channel.id,
@@ -71,14 +78,14 @@ module.exports = {
             });
         }
 
-        // On tente la connexion mais on NE BLOQUE PAS si ça échoue (on évite le crash)
         try {
-            await entersState(connection, VoiceConnectionStatus.Ready, 15000); // On laisse 15s (plus long pour Railway)
+            await entersState(connection, VoiceConnectionStatus.Ready, 15000);
             session.connection = connection;
+            // On prépare l'écoute du micro
             setupUserReceiver(session, interaction.user.id);
         } catch (err) {
-            console.warn("⚠️ Connexion vocale lente ou avortée, mais la session est maintenue.");
-            session.connection = connection; // On la garde quand même pour tenter plus tard
+            console.warn("⚠️ Connexion vocale lente, session maintenue.");
+            session.connection = connection;
         }
 
         // --- 5. INTERFACE ---
@@ -90,7 +97,7 @@ module.exports = {
 
         await channel.send({ 
             content: `<@${interaction.user.id}>`,
-            embeds: [new EmbedBuilder().setTitle("🎤 Entraînement Prêt").setDescription("Tu as maintenant accès au salon. Utilise `/lancer-test` dès que tu es prêt.")],
+            embeds: [new EmbedBuilder().setTitle("🎤 Entraînement Prêt").setDescription("Tu as maintenant accès au salon vocal. Utilise `/lancer-test` dès que tu es prêt.")],
             components: [buttons]
         });
 
