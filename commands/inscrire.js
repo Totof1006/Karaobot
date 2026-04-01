@@ -3,18 +3,17 @@ const {
     TextInputBuilder, TextInputStyle, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle 
 } = require('discord.js');
+const play = require('play-dl'); // AJOUT : Pour la recherche auto
 
-// IMPORT MIS À JOUR POUR COHÉRENCE TOTALE
 const { 
-    getEvent, registerPlayer, unregisterPlayer, 
-    setPlayerSongs, isRegistrationOpen, formatDate 
+    getEvent, registerPlayer, setPlayerSongs, 
+    isRegistrationOpen, formatDate 
 } = require('../utils/eventDB');
 
 const { errorEmbed } = require('../utils/embeds');
 const { checkCommandChannel } = require('../utils/channelGuard');
 const { MAX_SINGERS } = require('../utils/constants');
 
-// Fonction utilitaire pour rafraîchir l'affichage des participants
 async function refreshAnnouncement(interaction, guildId) {
     try {
         const event = getEvent(guildId);
@@ -51,13 +50,14 @@ async function showRegistrationModal(interaction) {
 
     const fields = [0, 1, 2].map((i) => {
         const ex = existing[i];
-        const value = ex ? `${ex.title} + ${ex.artist} = ${ex.url}` : '';
+        // MODIF : On n'affiche plus le format complexe, juste le titre ou l'url
+        const value = ex ? ex.title : ''; 
         return new ActionRowBuilder().addComponents(
             new TextInputBuilder()
                 .setCustomId(`song_${i}`)
-                .setLabel(`Chanson n°${i + 1} (Titre + Artiste = Lien)`)
+                .setLabel(`Chanson n°${i + 1} (Titre ou URL)`)
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ex: Soulman + Ben l\'Oncle Soul = https://...')
+                .setPlaceholder('Ex: Orelsan Ailleurs ou un lien YouTube')
                 .setValue(value)
                 .setRequired(i === 0)
         );
@@ -68,74 +68,66 @@ async function showRegistrationModal(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
-    // Étape 1 : Réponse différée (Sécurité 3s Discord)
     await interaction.deferReply({ ephemeral: true });
 
     const guildId = interaction.guildId;
     const event = getEvent(guildId);
     if (!event) return interaction.editReply({ embeds: [errorEmbed('Événement introuvable.')] });
 
-    // Étape 2 : Extraction des données du formulaire
-    const songs = [0, 1, 2].map(i => {
-        const raw = interaction.fields.getTextInputValue(`song_${i}`).trim();
-        if (!raw) return null;
-        
-        const eqSplit = raw.split('=');
-        const infoPart = eqSplit[0].trim();
-        const url = eqSplit[1] ? eqSplit[1].trim() : null;
-        
-        const plusSplit = infoPart.split('+');
-        const title = plusSplit[0]?.trim() || "Inconnu";
-        const artist = plusSplit[1]?.trim() || "Inconnu";
-        
-        return { title, artist, url };
-    }).filter(s => s !== null);
+    const rawInputs = [0, 1, 2].map(i => interaction.fields.getTextInputValue(`song_${i}`).trim()).filter(s => s.length > 0);
 
-    // Étape 3 : Recherche rapide des paroles
-    const validationResults = await Promise.all(songs.map(async (s) => {
+    const finalSongs = [];
+
+    // Étape : Recherche et Validation (Comme Pancake)
+    for (const input of rawInputs) {
+        let title = input;
+        let url = "";
+        let apiDuration = 0;
+
         try {
-            const query = encodeURIComponent(`${s.title} ${s.artist}`);
-            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
-            const results = await response.json();
-            
-            if (Array.isArray(results) && results.length > 0) {
-                const best = results[0];
-                return { 
-                    ok: true, 
-                    apiDuration: best.duration, 
-                    hasLyrics: !!(best.syncedLyrics || best.plainLyrics) 
-                };
+            // 1. Recherche YouTube automatique
+            if (!input.startsWith('http')) {
+                const search = await play.search(input, { limit: 1 });
+                if (search[0]) {
+                    title = search[0].title;
+                    url = search[0].url;
+                }
+            } else {
+                url = input;
+                const info = await play.video_info(input);
+                title = info.video_details.title;
             }
-            return { ok: false, apiDuration: 0, hasLyrics: false };
+
+            // 2. Recherche Paroles (LRCLIB)
+            const query = encodeURIComponent(title);
+            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
+            const lyricsData = await response.json();
+            if (lyricsData?.[0]) {
+                apiDuration = lyricsData[0].duration;
+            }
+
+            finalSongs.push({ title, url, apiDuration, verified: false });
         } catch (e) {
-            return { ok: false, apiDuration: 0, hasLyrics: false };
+            console.error("Erreur validation musique:", e.message);
+            finalSongs.push({ title: input, url: "", apiDuration: 0, verified: false });
         }
-    }));
+    }
 
-    // Étape 4 : Mise à jour des données
-    const finalSongs = songs.map((s, i) => ({
-        ...s,
-        apiDuration: validationResults[i].apiDuration,
-        verified: false
-    }));
-
-    // Inscription si nécessaire
+    // Sauvegarde DB
     if (!event.registrations.find(r => r.userId === interaction.user.id)) {
         registerPlayer(guildId, interaction.user.id, interaction.user.username);
     }
-    
-    // Sauvegarde des chansons (avec apiDuration)
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
     await refreshAnnouncement(interaction, guildId);
 
-    // Étape 5 : Réponse avec boutons
+    // Réponse
     const embed = new EmbedBuilder()
-        .setTitle('🎤 Inscription Enregistrée !')
+        .setTitle('🎤 Inscription Validée !')
         .setColor(0x57F287)
-        .setDescription("Tes chansons ont été ajoutées. Clique sur les boutons ci-dessous pour vérifier la correspondance avec YouTube.")
+        .setDescription("Le bot a trouvé tes musiques. Vérifie les détails ci-dessous.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
-            value: `**${s.title}** (${s.artist})\nParoles : ${validationResults[i].hasLyrics ? '✅ Trouvées' : '❌ Non trouvées'}`,
+            value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? '[Lien YouTube](' + s.url + ')' : '❌ Non trouvé'}\n**Paroles :** ${s.apiDuration > 0 ? '✅ Disponibles' : '❌ Non trouvées'}`,
             inline: false
         })));
 
@@ -145,7 +137,7 @@ async function handleModalSubmit(interaction) {
             new ButtonBuilder()
                 .setCustomId(`verify_song_${i}`)
                 .setLabel(`Vérifier n°${i + 1}`)
-                .setStyle(ButtonStyle.Primary)
+                .setStyle(ButtonStyle.Secondary)
                 .setDisabled(!s.url)
         );
     });
