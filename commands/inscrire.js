@@ -1,13 +1,11 @@
 const { 
     SlashCommandBuilder, EmbedBuilder, ModalBuilder, 
-    TextInputBuilder, TextInputStyle, ActionRowBuilder, 
-    ButtonBuilder, ButtonStyle 
+    TextInputBuilder, TextInputStyle, ActionRowBuilder 
 } = require('discord.js');
 const play = require('play-dl');
 
 const { 
-    getEvent, registerPlayer, setPlayerSongs, 
-    isRegistrationOpen, formatDate 
+    getEvent, registerPlayer, setPlayerSongs 
 } = require('../utils/eventDB');
 
 const { errorEmbed } = require('../utils/embeds');
@@ -31,7 +29,6 @@ async function refreshAnnouncement(interaction, guildId) {
             : event.registrations.map((r, i) => `${i + 1}. <@${r.userId}> — ✅`).join('\n');
 
         const updatedEmbed = EmbedBuilder.from(msg.embeds[0]);
-        
         const participantFieldName = `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`;
         const fields = updatedEmbed.data.fields || [];
         const participantFieldIndex = fields.findIndex(f => f.name && f.name.includes('Participants'));
@@ -52,6 +49,7 @@ async function showRegistrationModal(interaction) {
     const event = getEvent(interaction.guildId);
     if (!event) return interaction.reply({ embeds: [errorEmbed('Aucun événement planifié !')], ephemeral: true });
 
+    // On récupère les chansons existantes SI l'utilisateur est déjà inscrit
     const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
     const existing = alreadyRegistered?.songs || [];
 
@@ -74,11 +72,13 @@ async function showRegistrationModal(interaction) {
     });
 
     modal.addComponents(...fields);
+    
+    // IMPORTANT : On envoie le modal sans deferReply pour éviter l'échec d'interaction
     await interaction.showModal(modal);
 }
 
 async function handleModalSubmit(interaction) {
-    // 1. On diffère TOUJOURS la réponse pour éviter le timeout de 3s
+    // Ici on diffère car la recherche YouTube peut être longue
     await interaction.deferReply({ ephemeral: true });
 
     const guildId = interaction.guildId;
@@ -96,19 +96,21 @@ async function handleModalSubmit(interaction) {
             let title = input;
             let url = "";
 
-            // GESTION SPOTIFY : On transforme le lien en recherche YouTube
+            // Correction de la détection Spotify
             if (input.includes('spotify.com')) {
-                if (play.is_spotify_res(input)) {
-                    const spData = await play.spotify(input);
-                    const searchQuery = `${spData.name} ${spData.artists[0].name}`;
-                    const search = await play.search(searchQuery, { limit: 1 });
-                    if (search[0]) {
-                        title = search[0].title;
-                        url = search[0].url;
+                const spType = play.is_spotify_res(input);
+                if (spType && spType !== 'search') {
+                    const spData = await play.spotify(input).catch(() => null);
+                    if (spData) {
+                        const query = `${spData.name} ${spData.artists[0]?.name || ''}`;
+                        const search = await play.search(query, { limit: 1 });
+                        if (search[0]) {
+                            title = search[0].title;
+                            url = search[0].url;
+                        }
                     }
                 }
             } 
-            // GESTION YOUTUBE ET RECHERCHE TEXTE
             else if (!input.startsWith('http')) {
                 const search = await play.search(input, { limit: 1 });
                 if (search && search.length > 0) {
@@ -121,8 +123,12 @@ async function handleModalSubmit(interaction) {
                 if (info) title = info.video_details.title;
             }
 
-            // Sécurité : Si l'URL est toujours vide, on met une erreur au lieu de undefined
-            finalSongs.push({ title, url: url || "", verified: false });
+            // Sécurité absolue contre le "undefined"
+            finalSongs.push({ 
+                title: title || input, 
+                url: url || "", 
+                verified: false 
+            });
             
         } catch (e) {
             console.error(`Erreur recherche pour "${input}":`, e.message);
@@ -130,19 +136,17 @@ async function handleModalSubmit(interaction) {
         }
     }
 
-    // Sauvegarde en base de données
     if (!event.registrations.find(r => r.userId === interaction.user.id)) {
         registerPlayer(guildId, interaction.user.id, interaction.user.username);
     }
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
     
-    // Mise à jour de l'annonce publique
     await refreshAnnouncement(interaction, guildId);
 
     const embed = new EmbedBuilder()
         .setTitle('🎤 Inscription Enregistrée !')
         .setColor(0x57F287)
-        .setDescription("Tes musiques ont été traitées. Le bot a cherché la meilleure version audio disponible.")
+        .setDescription("Tes musiques ont été enregistrées avec succès.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
             value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? `[Lien YouTube](${s.url})` : '❌ Non trouvé'}`,
