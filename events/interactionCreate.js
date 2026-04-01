@@ -1,11 +1,11 @@
 const { EmbedBuilder, InteractionType, Events } = require('discord.js');
 const play = require('play-dl'); 
 
-// IMPORTATION REQUISE : On récupère getLyrics et les utilitaires d'affichage
+// IMPORTATION DES UTILITAIRES (Point 1 corrigé ici)
 const { getLyrics } = require('../utils/songList'); 
 const { errorEmbed } = require('../utils/embeds');
 
-// Fonctions utilitaires internes
+// Utilitaire de formatage de temps (0:00)
 function formatTime(seconds) {
     if (!seconds || seconds <= 0) return "0:00";
     const m = Math.floor(seconds / 60);
@@ -13,6 +13,7 @@ function formatTime(seconds) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Fonction de récupération de durée via YouTube
 async function getAudioDuration(input) {
     if (!input) return 0;
     try {
@@ -34,98 +35,98 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
 
-        // ── 1. SLASH COMMANDS ──
+        // ── 1. COMMANDES SLASH ──
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
             try {
                 await command.execute(interaction);
             } catch (err) {
-                console.error('[Slash Command Error]', err);
-                const msg = { embeds: [errorEmbed('Une erreur est survenue.')], ephemeral: true };
-                if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
-                else await interaction.reply(msg);
+                console.error('[Slash Error]', err);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ embeds: [errorEmbed('Erreur lors de la commande.')], ephemeral: true });
+                }
             }
             return;
         }
 
-        // ── 2. MODALS ──
+        // ── 2. SOUMISSION DE MODAL (Inscription Chansons) ──
         if (interaction.type === InteractionType.ModalSubmit) {
-            try {
-                // On délègue la gestion des morceaux à la commande qui a ouvert le modal 
-                // ou on ajoute un handler spécifique ici si besoin.
-                if (interaction.customId === 'modal_register_songs') {
-                    // Si handleModalSubmit est défini dans un autre fichier (ex: inscrire.js)
-                    const inscrire = client.commands.get('inscrire');
-                    if (inscrire && inscrire.handleModalSubmit) {
-                        await inscrire.handleModalSubmit(interaction);
-                    }
+            if (interaction.customId === 'modal_register_songs') {
+                const inscrire = client.commands.get('inscrire');
+                if (inscrire && inscrire.handleModalSubmit) {
+                    await inscrire.handleModalSubmit(interaction);
                 }
-            } catch (err) { console.error('[Modal Error]', err); }
+            }
             return;
         }
 
-        // ── 3. BOUTONS ──
+        // ── 3. BOUTONS (Le comparatif vidéo/lyrics) ──
         if (!interaction.isButton()) return;
-        const { customId, user } = interaction;
+        const { customId } = interaction;
 
         try {
-            // ── 4. BOUTONS : MODE ENTRAÎNEMENT ──
-            if (customId.startsWith('check_1_') || customId.startsWith('check_2_') || customId.startsWith('check_3_')) {
-                // Point n°2 déjà anticipé : on utilise deferReply pour éviter le "Unknown Interaction"
+            if (customId.startsWith('check_')) {
+                // SOLUTION POINT 2 : On diffère la réponse pour éviter le timeout de 3s
                 await interaction.deferReply({ ephemeral: true });
 
                 const parts = customId.split('_');
                 const index = parseInt(parts[1]) - 1; 
                 const userId = parts[2];
 
+                // On récupère la session d'entraînement
                 const session = global.trainingSessions?.get(userId);
-                if (!session) return interaction.editReply({ content: "❌ Session expirée ou introuvable." });
+                if (!session) return interaction.editReply({ content: "❌ Session expirée. Relancez la commande." });
 
                 const trackInput = session.songs[index];
-                if (!trackInput) return interaction.editReply({ content: "❌ Chanson introuvable dans la liste." });
+                if (!trackInput) return interaction.editReply({ content: "❌ Musique introuvable." });
 
-                // Récupération de la durée Vidéo
+                // --- LE COMPARATIF (Réintégré et sécurisé) ---
+                
+                // A. Durée de la vidéo YouTube
                 const youtubeDuration = await getAudioDuration(trackInput);
                 
-                // Récupération de la durée Paroles (Correction de la ReferenceError)
+                // B. Durée des paroles (.lrc local ou LRCLIB)
                 let apiDuration = 0;
-                const localLyrics = getLyrics(trackInput); // Appel à la fonction importée
+                const localLyrics = getLyrics(trackInput); 
                 
                 if (localLyrics && localLyrics.durationMs) {
                     apiDuration = Math.round(localLyrics.durationMs / 1000);
                 } else {
+                    // Si pas de .lrc local, on check LRCLIB pour donner une info quand même
                     try {
                         const response = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(trackInput)}`);
                         const results = await response.json();
                         if (results?.[0]) apiDuration = results[0].duration;
-                    } catch (e) { console.error("Erreur LRCLIB:", e); }
+                    } catch (e) { console.error("Erreur LRCLIB:", e.message); }
                 }
 
                 const diff = Math.abs(youtubeDuration - apiDuration);
                 const isMatch = youtubeDuration > 0 && apiDuration > 0 && diff <= 15;
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`🔍 Vérification : ${trackInput}`)
+                    .setTitle(`🔍 Comparaison : ${trackInput}`)
                     .setColor(isMatch ? 0x57F287 : 0xED4245)
                     .addFields(
-                        { name: '🎙️ Durée Paroles', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Durée Vidéo', value: formatTime(youtubeDuration), inline: true }
+                        { name: '🎙️ Durée Lyrics (.lrc)', value: apiDuration > 0 ? formatTime(apiDuration) : 'Indisponible', inline: true },
+                        { name: '📺 Durée YouTube', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : 'Indisponible', inline: true }
                     );
 
                 if (apiDuration === 0) {
-                    embed.setDescription("❌ **Verdict** : Paroles introuvables. La synchronisation ne fonctionnera pas.");
+                    embed.setDescription("❌ **Verdict** : Aucun fichier de paroles trouvé. La synchro ne fonctionnera pas.");
                 } else if (isMatch) {
-                    embed.setDescription("✅ **Verdict** : Les durées correspondent ! Le karaoké sera bien synchronisé.");
+                    embed.setDescription("✅ **Verdict** : Les durées correspondent ! Le karaoké sera parfaitement synchronisé.");
                 } else {
-                    embed.setDescription(`⚠️ **Verdict** : Écart de **${Math.round(diff)}s**. La vidéo et les paroles ne sont probablement pas la même version.`);
+                    embed.setDescription(`⚠️ **Verdict** : Écart de **${Math.round(diff)}s**. Attention, les paroles risquent d'être décalées par rapport à la vidéo.`);
                 }
 
+                // On utilise editReply car on a fait un deferReply au début
                 return await interaction.editReply({ embeds: [embed] });
             }
             
         } catch (err) {
-            console.error('[Global Button Error]', err);
+            console.error('[Button Error]', err);
+            if (interaction.deferred) await interaction.editReply({ content: "Une erreur est survenue lors de la vérification." });
         }
     },
 };
