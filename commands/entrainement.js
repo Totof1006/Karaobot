@@ -57,22 +57,29 @@ module.exports = {
         };
         global.trainingSessions.set(interaction.user.id, session);
 
-        // --- CONNEXION ---
+       // --- CONNEXION (Version optimisée) ---
         let connection = getVoiceConnection(interaction.guild.id);
         if (!connection || connection.joinConfig.channelId !== channel.id) {
             connection = joinVoiceChannel({
                 channelId: channel.id,
                 guildId: interaction.guild.id,
                 adapterCreator: interaction.guild.voiceAdapterCreator,
-                selfDeaf: false, selfMute: false
+                selfDeaf: false, 
+                selfMute: false
             });
         }
 
         try {
+            // On attend que la connexion soit prête
             await entersState(connection, VoiceConnectionStatus.Ready, 15000);
             session.connection = connection;
             setupUserReceiver(session, interaction.user.id);
-        } catch (err) { session.connection = connection; }
+        } catch (err) {
+            // MODIFICATION ICI : Si ça échoue, on détruit la connexion propre
+            console.error("Échec de la connexion vocale:", err);
+            if (connection) connection.destroy();
+            session.connection = null;
+        }
 
         // --- INTERFACE ---
         const buttons = new ActionRowBuilder().addComponents(
