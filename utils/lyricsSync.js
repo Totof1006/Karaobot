@@ -22,7 +22,6 @@ function parseLRC(content) {
     }
     
     const sortedLines = lines.sort((a, b) => a.timeMs - b.timeMs);
-
     sortedLines.durationMs = sortedLines.length > 0 
         ? sortedLines[sortedLines.length - 1].timeMs + 3000 
         : 0;
@@ -30,27 +29,33 @@ function parseLRC(content) {
     return sortedLines;
 }
 
-// --- SECTION CORRIGÉE ---
+// --- SECTION SLUGIFY AMÉLIORÉE ---
 function slugify(name) {
-    // Vérifie si 'name' est l'objet de session { info: "titre" } ou juste du texte
     const text = (typeof name === 'object' && name !== null) ? name.info : name;
-    
-    // Sécurité si le texte est manquant ou n'est pas une chaîne
     if (!text || typeof text !== 'string') return 'unknown_song';
 
     return text.toLowerCase()
         .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_|_$/g, '');
+        .replace(/[\u0300-\u036f]/g, '') // Enlever les accents
+        .replace(/[^a-z0-9]+/g, '_')     // Remplacer tout ce qui n'est pas alphanumérique par _
+        .replace(/^_|_$/g, '');          // Nettoyer les bords
 }
-// ------------------------
 
 function findLRCFile(songName) {
     if (!fs.existsSync(LYRICS_DIR)) fs.mkdirSync(LYRICS_DIR, { recursive: true });
+    
     const slug = slugify(songName);
-    const filePath = path.join(LYRICS_DIR, `${slug}.lrc`);
-    return fs.existsSync(filePath) ? filePath : null;
+    const files = fs.readdirSync(LYRICS_DIR);
+    
+    // 1. Tentative de match exact
+    const exactMatch = path.join(LYRICS_DIR, `${slug}.lrc`);
+    if (fs.existsSync(exactMatch)) return exactMatch;
+
+    // 2. Recherche intelligente (si le fichier contient le mot-clé du slug)
+    // Utile si tu tapes "Orelsan Ailleurs" et que le fichier s'appelle "orelsan_ailleurs_officiel.lrc"
+    const smartMatch = files.find(f => slug.includes(f.replace('.lrc', '')) || f.replace('.lrc', '').includes(slug));
+    
+    return smartMatch ? path.join(LYRICS_DIR, smartMatch) : null;
 }
 
 function getLyrics(songName) {
@@ -68,9 +73,8 @@ function startLyricsStream(channel, lines, onFinish) {
     let lyricsMessage = null;
 
     lines.forEach((line, index) => {
-        const delay = line.timeMs - (Date.now() - startTime);
-        if (delay < 0) return;
-
+        const delay = line.timeMs; // On se base sur le temps absolu du LRC
+        
         const t = setTimeout(async () => {
             const nextLine = lines[index + 1];
             const lineDuration = nextLine ? (nextLine.timeMs - line.timeMs) : 5000;
@@ -89,20 +93,19 @@ function startLyricsStream(channel, lines, onFinish) {
                     .setFooter({ text: "Suivez le curseur 🎙️ pour chanter !" });
 
                 try {
-                    if (!lyricsMessage) {
+                    if (!lyricsMessage || !lyricsMessage.editable) {
                         lyricsMessage = await channel.send({ embeds: [embed] });
                     } else {
-                        await lyricsMessage.edit({ embeds: [embed] });
+                        await lyricsMessage.edit({ embeds: [embed] }).catch(() => null);
                     }
                 } catch (e) {
-                    if (e.code === 10008) {
-                        clearInterval(animInterval);
-                    }
+                    console.error("[Lyrics] Erreur d'affichage :", e.message);
                 }
             };
 
             await updateDisplay();
-            const animInterval = setInterval(updateDisplay, 1000);
+            // On limite l'intervalle à 1.5s pour éviter d'être banni par Discord pour spam d'éditions
+            const animInterval = setInterval(updateDisplay, 1500);
             intervals.push(animInterval);
 
             setTimeout(() => {
@@ -116,8 +119,9 @@ function startLyricsStream(channel, lines, onFinish) {
         timers.push(t);
     });
 
+    // Gestion de la fin
     const lastLine = lines[lines.length - 1];
-    const endDelay = Math.max(0, lastLine.timeMs + 3000 - (Date.now() - startTime));
+    const endDelay = lastLine.timeMs + 3000;
     timers.push(setTimeout(() => { if (onFinish) onFinish(); }, endDelay));
 
     return function stop() {
