@@ -32,10 +32,9 @@ async function refreshAnnouncement(interaction, guildId) {
 
         const updatedEmbed = EmbedBuilder.from(msg.embeds[0]);
         
-        // CORRECTION SÉCURISÉE : Mise à jour ou ajout du champ Participants
         const participantFieldName = `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`;
         const fields = updatedEmbed.data.fields || [];
-        const participantFieldIndex = fields.findIndex(f => f.name.includes('Participants'));
+        const participantFieldIndex = fields.findIndex(f => f.name && f.name.includes('Participants'));
 
         if (participantFieldIndex !== -1) {
             updatedEmbed.spliceFields(participantFieldIndex, 1, { name: participantFieldName, value: playerList });
@@ -68,7 +67,7 @@ async function showRegistrationModal(interaction) {
                 .setCustomId(`song_${i}`)
                 .setLabel(`Chanson n°${i + 1} (Titre ou URL)`)
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ex: Orelsan Ailleurs ou un lien YouTube')
+                .setPlaceholder('Ex: Orelsan Ailleurs ou lien YouTube/Spotify')
                 .setValue(value)
                 .setRequired(i === 0)
         );
@@ -79,7 +78,7 @@ async function showRegistrationModal(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
-    // Évite le timeout de 3s
+    // 1. On diffère TOUJOURS la réponse pour éviter le timeout de 3s
     await interaction.deferReply({ ephemeral: true });
 
     const guildId = interaction.guildId;
@@ -97,23 +96,36 @@ async function handleModalSubmit(interaction) {
             let title = input;
             let url = "";
 
-            if (!input.startsWith('http')) {
-                // Recherche
+            // GESTION SPOTIFY : On transforme le lien en recherche YouTube
+            if (input.includes('spotify.com')) {
+                if (play.is_spotify_res(input)) {
+                    const spData = await play.spotify(input);
+                    const searchQuery = `${spData.name} ${spData.artists[0].name}`;
+                    const search = await play.search(searchQuery, { limit: 1 });
+                    if (search[0]) {
+                        title = search[0].title;
+                        url = search[0].url;
+                    }
+                }
+            } 
+            // GESTION YOUTUBE ET RECHERCHE TEXTE
+            else if (!input.startsWith('http')) {
                 const search = await play.search(input, { limit: 1 });
                 if (search && search.length > 0) {
                     title = search[0].title;
                     url = search[0].url;
                 }
             } else {
-                // URL directe
                 url = input;
                 const info = await play.video_info(input).catch(() => null);
                 if (info) title = info.video_details.title;
             }
 
-            finalSongs.push({ title, url, verified: false });
+            // Sécurité : Si l'URL est toujours vide, on met une erreur au lieu de undefined
+            finalSongs.push({ title, url: url || "", verified: false });
+            
         } catch (e) {
-            console.error(`Erreur play-dl pour "${input}":`, e.message);
+            console.error(`Erreur recherche pour "${input}":`, e.message);
             finalSongs.push({ title: input, url: "", verified: false });
         }
     }
@@ -124,13 +136,13 @@ async function handleModalSubmit(interaction) {
     }
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
     
-    // Mise à jour visuelle de l'annonce
+    // Mise à jour de l'annonce publique
     await refreshAnnouncement(interaction, guildId);
 
     const embed = new EmbedBuilder()
         .setTitle('🎤 Inscription Enregistrée !')
         .setColor(0x57F287)
-        .setDescription("Tes musiques ont été validées. Tu peux les modifier à tout moment en relançant la commande.")
+        .setDescription("Tes musiques ont été traitées. Le bot a cherché la meilleure version audio disponible.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
             value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? `[Lien YouTube](${s.url})` : '❌ Non trouvé'}`,
