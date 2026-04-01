@@ -18,9 +18,11 @@ async function refreshAnnouncement(interaction, guildId) {
     try {
         const event = getEvent(guildId);
         if (!event?.announceMsgId) return;
+        
         const announceChId = event.announceChannelId || event.channelId;
         const ch = await interaction.client.channels.fetch(announceChId).catch(() => null);
         if (!ch) return;
+        
         const msg = await ch.messages.fetch(event.announceMsgId).catch(() => null);
         if (!msg) return;
 
@@ -29,14 +31,21 @@ async function refreshAnnouncement(interaction, guildId) {
             : event.registrations.map((r, i) => `${i + 1}. <@${r.userId}> — ✅`).join('\n');
 
         const updatedEmbed = EmbedBuilder.from(msg.embeds[0]);
-        // On vérifie si les champs existent avant de splice
-        if (updatedEmbed.data.fields && updatedEmbed.data.fields.length >= 4) {
-            updatedEmbed.spliceFields(3, 1, { name: `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`, value: playerList });
+        
+        // CORRECTION SÉCURISÉE : Mise à jour ou ajout du champ Participants
+        const participantFieldName = `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`;
+        const fields = updatedEmbed.data.fields || [];
+        const participantFieldIndex = fields.findIndex(f => f.name.includes('Participants'));
+
+        if (participantFieldIndex !== -1) {
+            updatedEmbed.spliceFields(participantFieldIndex, 1, { name: participantFieldName, value: playerList });
+        } else {
+            updatedEmbed.addFields({ name: participantFieldName, value: playerList });
         }
 
         await msg.edit({ embeds: [updatedEmbed] });
     } catch (e) { 
-        console.error('Erreur refresh:', e.message); 
+        console.error('Erreur refresh announcement:', e.message); 
     }
 }
 
@@ -70,7 +79,7 @@ async function showRegistrationModal(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
-    // On répond immédiatement pour éviter le timeout
+    // Évite le timeout de 3s
     await interaction.deferReply({ ephemeral: true });
 
     const guildId = interaction.guildId;
@@ -87,39 +96,44 @@ async function handleModalSubmit(interaction) {
         try {
             let title = input;
             let url = "";
-            let apiDuration = 0;
 
             if (!input.startsWith('http')) {
+                // Recherche
                 const search = await play.search(input, { limit: 1 });
-                if (search[0]) {
+                if (search && search.length > 0) {
                     title = search[0].title;
                     url = search[0].url;
                 }
             } else {
+                // URL directe
                 url = input;
-                const info = await play.video_info(input);
-                title = info.video_details.title;
+                const info = await play.video_info(input).catch(() => null);
+                if (info) title = info.video_details.title;
             }
 
-            finalSongs.push({ title, url, apiDuration, verified: false });
+            finalSongs.push({ title, url, verified: false });
         } catch (e) {
-            finalSongs.push({ title: input, url: "", apiDuration: 0, verified: false });
+            console.error(`Erreur play-dl pour "${input}":`, e.message);
+            finalSongs.push({ title: input, url: "", verified: false });
         }
     }
 
+    // Sauvegarde en base de données
     if (!event.registrations.find(r => r.userId === interaction.user.id)) {
         registerPlayer(guildId, interaction.user.id, interaction.user.username);
     }
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
+    
+    // Mise à jour visuelle de l'annonce
     await refreshAnnouncement(interaction, guildId);
 
     const embed = new EmbedBuilder()
-        .setTitle('🎤 Inscription Validée !')
+        .setTitle('🎤 Inscription Enregistrée !')
         .setColor(0x57F287)
-        .setDescription("Tes musiques ont été enregistrées avec succès.")
+        .setDescription("Tes musiques ont été validées. Tu peux les modifier à tout moment en relançant la commande.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
-            value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? '[Lien YouTube](' + s.url + ')' : '❌ Non trouvé'}`,
+            value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? `[Lien YouTube](${s.url})` : '❌ Non trouvé'}`,
             inline: false
         })));
 
