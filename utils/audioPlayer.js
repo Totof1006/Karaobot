@@ -28,11 +28,11 @@ async function playAudio(session, input, onFinish) {
             }
         }
 
-       // Lecture du flux avec typage explicite pour Voice 0.19.2
+        // Lecture du flux avec typage explicite pour Voice
         const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
         
         const resource = createAudioResource(stream.stream, { 
-            inputType: stream.type, // play-dl donne le type exact (Opus ou Arbitrary)
+            inputType: stream.type, 
             inlineVolume: true 
         });
 
@@ -48,9 +48,14 @@ async function playAudio(session, input, onFinish) {
 
         session.player.once('error', (err) => {
             console.error("[AudioPlayer] Erreur :", err.message);
-            // On stoppe le player en cas d'erreur pour libérer le flux
             session.player.stop(); 
             onFinish();
         });
+
+    } catch (error) {
+        console.error("[AudioPlayer] Erreur critique :", error);
+        onFinish();
+    }
+}
 
 module.exports = { playAudio };
