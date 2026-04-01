@@ -111,12 +111,13 @@ function setPlayerSongs(guildId, userId, songs) {
     const reg = event.registrations.find(r => r.userId === userId);
     if (!reg)  return false;
     
+    // On mappe les chansons en gardant la flexibilité pour le titre complet
     reg.songs = songs.map(s => ({
         title: s.title || "Inconnu",
-        artist: s.artist || "Inconnu",
         url: s.url || null,
         apiDuration: s.apiDuration || 0,
         verified: s.verified || false
+        // Note: L'artiste est désormais souvent inclus dans le titre par play-dl
     }));
     
     saveDB(db);
