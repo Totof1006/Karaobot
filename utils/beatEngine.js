@@ -6,22 +6,29 @@
  * @returns {string} - La ligne formatée
  */
 function getBeatLine(pattern, totalDuration, elapsed) {
+    // Sécurité de base
     if (!pattern || totalDuration <= 0) return "🎶";
 
+    // Conversion en tableau pour gérer les émojis multi-octets (ex: 🟩)
     const chars = Array.from(pattern);
-    const progress = Math.max(0, Math.min(elapsed / totalDuration, 0.99));
-    const currentIndex = Math.floor(progress * chars.length);
+    const len = chars.length;
 
-    // On crée la ligne en remplaçant la position actuelle
-    // ASTUCE : On peut ajouter un espace invisible ou un indicateur de rythme
+    // Calcul de l'index actuel (0 à len - 1)
+    // On utilise Math.min pour éviter que le curseur ne sorte de la ligne à la fin
+    const progress = elapsed / totalDuration;
+    let currentIndex = Math.floor(progress * len);
+    
+    if (currentIndex >= len) currentIndex = len - 1;
+    if (currentIndex < 0) currentIndex = 0;
+
+    // Construction de la ligne
     return chars.map((char, index) => {
         if (index === currentIndex) {
-            // Option A : Remplacer par le micro (ton code actuel, très clair)
+            // On utilise le micro pour marquer la position actuelle
             return '🎙️'; 
-            
-            // Option B : Si tu veux garder la couleur visible (ex: 🎤)
-            // return '🎤'; 
         }
+        
+        // On garde les carrés originaux pour le reste de la ligne
         return char;
     }).join('');
 }
