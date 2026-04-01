@@ -28,22 +28,29 @@ async function playAudio(session, input, onFinish) {
             }
         }
 
-        // Lecture du flux (compatible avec les nouvelles normes Discord)
+       // Lecture du flux avec typage explicite pour Voice 0.19.2
         const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
-        const resource = createAudioResource(stream.stream, { inputType: stream.type });
+        
+        const resource = createAudioResource(stream.stream, { 
+            inputType: stream.type, // play-dl donne le type exact (Opus ou Arbitrary)
+            inlineVolume: true 
+        });
 
+        // Sécurité : on nettoie les anciens événements avant de jouer
         session.player.removeAllListeners();
+
         session.player.play(resource);
 
-        session.player.once(AudioPlayerStatus.Idle, () => onFinish());
-        session.player.once('error', (err) => {
-            console.error("[AudioPlayer] Erreur :", err.message);
+        // Gestion propre de la fin de lecture
+        session.player.once(AudioPlayerStatus.Idle, () => {
             onFinish();
         });
-    } catch (e) {
-        console.error("[AudioPlayer] Erreur critique :", e.message);
-        onFinish();
-    }
-}
+
+        session.player.once('error', (err) => {
+            console.error("[AudioPlayer] Erreur :", err.message);
+            // On stoppe le player en cas d'erreur pour libérer le flux
+            session.player.stop(); 
+            onFinish();
+        });
 
 module.exports = { playAudio };
