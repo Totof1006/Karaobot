@@ -3,7 +3,7 @@ const {
     TextInputBuilder, TextInputStyle, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle 
 } = require('discord.js');
-const play = require('play-dl'); // AJOUT : Pour la recherche auto
+const play = require('play-dl');
 
 const { 
     getEvent, registerPlayer, setPlayerSongs, 
@@ -28,8 +28,11 @@ async function refreshAnnouncement(interaction, guildId) {
             ? '_Aucun inscrit_'
             : event.registrations.map((r, i) => `${i + 1}. <@${r.userId}> — ✅`).join('\n');
 
-        const updatedEmbed = EmbedBuilder.from(msg.embeds[0])
-            .spliceFields(3, 1, { name: `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`, value: playerList });
+        const updatedEmbed = EmbedBuilder.from(msg.embeds[0]);
+        // On vérifie si les champs existent avant de splice
+        if (updatedEmbed.data.fields && updatedEmbed.data.fields.length >= 4) {
+            updatedEmbed.spliceFields(3, 1, { name: `👥 Participants (${event.registrations.length}/${MAX_SINGERS})`, value: playerList });
+        }
 
         await msg.edit({ embeds: [updatedEmbed] });
     } catch (e) { 
@@ -50,7 +53,6 @@ async function showRegistrationModal(interaction) {
 
     const fields = [0, 1, 2].map((i) => {
         const ex = existing[i];
-        // MODIF : On n'affiche plus le format complexe, juste le titre ou l'url
         const value = ex ? ex.title : ''; 
         return new ActionRowBuilder().addComponents(
             new TextInputBuilder()
@@ -68,24 +70,25 @@ async function showRegistrationModal(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
+    // On répond immédiatement pour éviter le timeout
     await interaction.deferReply({ ephemeral: true });
 
     const guildId = interaction.guildId;
     const event = getEvent(guildId);
     if (!event) return interaction.editReply({ embeds: [errorEmbed('Événement introuvable.')] });
 
-    const rawInputs = [0, 1, 2].map(i => interaction.fields.getTextInputValue(`song_${i}`).trim()).filter(s => s.length > 0);
+    const rawInputs = [0, 1, 2]
+        .map(i => interaction.fields.getTextInputValue(`song_${i}`).trim())
+        .filter(s => s.length > 0);
 
     const finalSongs = [];
 
-    // Étape : Recherche et Validation (Comme Pancake)
     for (const input of rawInputs) {
-        let title = input;
-        let url = "";
-        let apiDuration = 0;
-
         try {
-            // 1. Recherche YouTube automatique
+            let title = input;
+            let url = "";
+            let apiDuration = 0;
+
             if (!input.startsWith('http')) {
                 const search = await play.search(input, { limit: 1 });
                 if (search[0]) {
@@ -98,51 +101,29 @@ async function handleModalSubmit(interaction) {
                 title = info.video_details.title;
             }
 
-            // 2. Recherche Paroles (LRCLIB)
-            const query = encodeURIComponent(title);
-            const response = await fetch(`https://lrclib.net/api/search?q=${query}`);
-            const lyricsData = await response.json();
-            if (lyricsData?.[0]) {
-                apiDuration = lyricsData[0].duration;
-            }
-
             finalSongs.push({ title, url, apiDuration, verified: false });
         } catch (e) {
-            console.error("Erreur validation musique:", e.message);
             finalSongs.push({ title: input, url: "", apiDuration: 0, verified: false });
         }
     }
 
-    // Sauvegarde DB
     if (!event.registrations.find(r => r.userId === interaction.user.id)) {
         registerPlayer(guildId, interaction.user.id, interaction.user.username);
     }
     setPlayerSongs(guildId, interaction.user.id, finalSongs);
     await refreshAnnouncement(interaction, guildId);
 
-    // Réponse
     const embed = new EmbedBuilder()
         .setTitle('🎤 Inscription Validée !')
         .setColor(0x57F287)
-        .setDescription("Le bot a trouvé tes musiques. Vérifie les détails ci-dessous.")
+        .setDescription("Tes musiques ont été enregistrées avec succès.")
         .addFields(finalSongs.map((s, i) => ({
             name: `Chanson ${i + 1}`,
-            value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? '[Lien YouTube](' + s.url + ')' : '❌ Non trouvé'}\n**Paroles :** ${s.apiDuration > 0 ? '✅ Disponibles' : '❌ Non trouvées'}`,
+            value: `**Titre :** ${s.title}\n**Lien :** ${s.url ? '[Lien YouTube](' + s.url + ')' : '❌ Non trouvé'}`,
             inline: false
         })));
 
-    const row = new ActionRowBuilder();
-    finalSongs.forEach((s, i) => {
-        row.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`verify_song_${i}`)
-                .setLabel(`Vérifier n°${i + 1}`)
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(!s.url)
-        );
-    });
-
-    return interaction.editReply({ embeds: [embed], components: [row] });
+    return interaction.editReply({ embeds: [embed] });
 }
 
 module.exports = {
