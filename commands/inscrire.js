@@ -63,9 +63,9 @@ async function showRegistrationModal(interaction) {
         return new ActionRowBuilder().addComponents(
             new TextInputBuilder()
                 .setCustomId(`song_${i}`)
-                .setLabel(`Chanson n°${i + 1} (Titre ou URL)`)
+                .setLabel(`Chanson n°${i + 1} (Titre Artiste)`) // Changement ici
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ex: Orelsan Ailleurs ou lien YouTube/Spotify')
+                .setPlaceholder('Ex: Ailleurs Orelsan ou Lose Yourself Eminem') // Changement ici
                 .setValue(value)
                 .setRequired(i === 0)
         );
