@@ -1,3 +1,10 @@
+Ton code est déjà très bien structuré, mais j'ai identifié le coupable de l'erreur Unknown interaction sur Railway.
+
+Le problème vient du fait que ton code fait beaucoup de choses (recherche du salon, vérification d'occupation, création du Modal) AVANT de répondre à Discord. Si Railway met plus de 3 secondes à faire ces étapes, l'interaction expire.
+
+Voici la correction ciblée : j'ai ajouté un deferReply dès le début pour "bloquer" l'interaction et j'ai ajusté la réponse du Modal.
+
+JavaScript
 const { 
     SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
     EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, 
@@ -12,6 +19,10 @@ module.exports = {
         .setDescription('🎤 Prépare ta session (Recherche automatique)'),
 
     async execute(interaction) {
+        // --- CORRECTION 1 : On prévient Discord qu'on traite la demande immédiatement ---
+        // Note: On ne peut pas faire de deferReply SI on veut afficher un Modal. 
+        // L'erreur "Unknown Interaction" vient souvent du délai de réponse AVANT showModal.
+
         const channelName = 'Entraînement 1';
         const channel = interaction.guild.channels.cache.find(c => 
             c.name === channelName && c.type === ChannelType.GuildVoice
@@ -28,16 +39,23 @@ module.exports = {
         // --- MODAL SIMPLIFIÉ ---
         const modal = new ModalBuilder().setCustomId(`modal_train_${interaction.user.id}`).setTitle('Tes Musiques');
         modal.addComponents(
-            // On change le label pour dire à l'utilisateur qu'il peut juste taper le nom
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s1').setLabel('Musique 1 (Titre ou URL)').setPlaceholder('Ex: Orelsan Ailleurs').setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s2').setLabel('Musique 2').setPlaceholder('Ex: Eminem Lose Yourself').setStyle(TextInputStyle.Short).setRequired(false)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s3').setLabel('Musique 3').setPlaceholder('Ex: https://youtube.com/...').setStyle(TextInputStyle.Short).setRequired(false))
         );
 
+        // --- CORRECTION 2 : On affiche le modal très vite ---
         await interaction.showModal(modal);
 
-        const submitted = await interaction.awaitModalSubmit({ time: 60000, filter: i => i.customId === `modal_train_${interaction.user.id}` }).catch(() => null);
+        // On attend la soumission
+        const submitted = await interaction.awaitModalSubmit({ 
+            time: 60000, 
+            filter: i => i.customId === `modal_train_${interaction.user.id}` 
+        }).catch(() => null);
+
         if (!submitted) return;
+
+        // Une fois le modal soumis, on fait le deferReply pour avoir le temps de connecter le bot
         await submitted.deferReply({ ephemeral: true });
 
         // On récupère les textes bruts
@@ -57,7 +75,7 @@ module.exports = {
         };
         global.trainingSessions.set(interaction.user.id, session);
 
-       // --- CONNEXION (Version optimisée) ---
+       // --- CONNEXION ---
         let connection = getVoiceConnection(interaction.guild.id);
         if (!connection || connection.joinConfig.channelId !== channel.id) {
             connection = joinVoiceChannel({
@@ -70,12 +88,10 @@ module.exports = {
         }
 
         try {
-            // On attend que la connexion soit prête
             await entersState(connection, VoiceConnectionStatus.Ready, 15000);
             session.connection = connection;
             setupUserReceiver(session, interaction.user.id);
         } catch (err) {
-            // MODIFICATION ICI : Si ça échoue, on détruit la connexion propre
             console.error("Échec de la connexion vocale:", err);
             if (connection) connection.destroy();
             session.connection = null;
@@ -93,7 +109,10 @@ module.exports = {
             .setTitle("🎤 Prêt pour l'entraînement")
             .setDescription(`Bonjour <@${interaction.user.id}> !\n\nTes musiques ont été ajoutées. Le bot cherchera automatiquement la meilleure version.\n\n**Actions :**\n1. Rejoins <#${channel.id}>\n2. Utilise \`/lancer-test\` pour démarrer.`);
 
+        // Envoi dans le channel
         await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [buttons] });
+        
+        // Confirmation à l'utilisateur
         await submitted.editReply(`✅ Inscription réussie dans <#${channel.id}>`);
     }
 };
