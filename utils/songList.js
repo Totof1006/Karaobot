@@ -20,12 +20,12 @@ function getAvailableSongs() {
         .sort((a, b) => a.title.localeCompare(b.title));
 }
 
-// 2. NOUVEAU : Fonction getLyrics (Celle qui manquait !)
+// 2. Fonction getLyrics
 // Elle lit le fichier .lrc et calcule sa durée pour la comparaison
 function getLyrics(songName) {
     if (!songName) return null;
 
-    // Génération du slug pour trouver le fichier (ex: "Ailleurs Orelsan" -> "ailleurs_orelsan.lrc")
+    // Génération du slug (ex: "Ailleurs Orelsan" -> "ailleurs_orelsan.lrc")
     const slug = songName
         .toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
