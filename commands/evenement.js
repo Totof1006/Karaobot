@@ -1,3 +1,10 @@
+Ton code pour la commande evenement est déjà très solide car il utilise déjà un deferReply. Le seul risque ici est le délai de traitement entre les options de la commande et le premier reply.
+
+Sur Railway, si le serveur met un peu de temps à parser les dates ou à chercher le salon, l'interaction peut expirer avant d'atteindre ton await interaction.deferReply({ ephemeral: true });.
+
+Voici la correction pour sécuriser l'interaction dès l'entrée de la fonction :
+
+JavaScript
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType,
         EmbedBuilder, GuildScheduledEventEntityType,
         GuildScheduledEventPrivacyLevel }                         = require('discord.js');
@@ -35,10 +42,14 @@ module.exports = {
       .setRequired(false)),
 
   async execute(interaction) {
+    // --- CORRECTION : On déclenche le deferReply immédiatement ---
+    // Cela donne 15 minutes au bot pour faire tous les calculs suivants sans expirer.
+    await interaction.deferReply({ ephemeral: true });
+
     const guildId = interaction.guildId;
 
     if (getEvent(guildId)) {
-      return interaction.reply({
+      return interaction.editReply({ // Changé reply en editReply car on a defer
         embeds: [errorEmbed('Un événement existe déjà ! Utilisez `/annuler-evenement` avant d\'en créer un nouveau.')],
         ephemeral: true,
       });
@@ -55,27 +66,25 @@ module.exports = {
     const registrationEnd   = parseFrDate(rawClose);
 
     if (!eventDate || !registrationStart || !registrationEnd) {
-      return interaction.reply({
+      return interaction.editReply({ // Changé en editReply
         embeds: [errorEmbed('Format de date invalide. Utilise **JJ/MM/AAAA HH:MM** (ex: `28/03/2025 20:30`)')],
         ephemeral: true,
       });
     }
 
     if (registrationStart >= registrationEnd) {
-      return interaction.reply({
+      return interaction.editReply({ // Changé en editReply
         embeds: [errorEmbed('La date d\'ouverture doit être avant la date de fermeture.')],
         ephemeral: true,
       });
     }
 
     if (registrationEnd >= eventDate) {
-      return interaction.reply({
+      return interaction.editReply({ // Changé en editReply
         embeds: [errorEmbed('La fermeture des inscriptions doit être avant la date de la session.')],
         ephemeral: true,
       });
     }
-
-    await interaction.deferReply({ ephemeral: true });
 
     // ── Poster le message d'annonce dans le salon cible (#karaoké) ────────────
     const embed = buildAnnouncementEmbed(titre, eventDate, registrationStart, registrationEnd);
@@ -111,8 +120,6 @@ module.exports = {
           ? { channel: voiceChannel }
           : { entityMetadata: { location: `Salon karaoké Discord` } }
         ),
-        // Image optionnelle — à décommenter si tu veux une bannière
-        // image: 'https://...url-image...',
       });
 
       discordEventId  = scheduledEvent.id;
@@ -120,33 +127,29 @@ module.exports = {
       console.log(`[Événement] Événement natif Discord créé : ${scheduledEvent.id}`);
     } catch (err) {
       console.error('[Événement] Erreur création événement natif:', err.message);
-      // Non bloquant — on continue même si ça échoue
     }
 
     // ── Sauvegarder l'événement bot ───────────────────────────────────────────
-    // channelId         = salon vocal karaoké (session, micros, votes en direct)
-    // announceChannelId = salon texte annonces (inscriptions, boutons, récaps)
     const savedVoiceChId = loadVoiceChannel(guildId);
 
-// Sécurité : on vérifie que le salon vocal est bien en mémoire
-if (!savedVoiceChId) {
-    return interaction.editReply({
-        embeds: [errorEmbed("❌ Aucun salon vocal n'est configuré. Utilisez d'abord la commande de configuration du salon vocal.")],
-        ephemeral: true
-    });
-}
+    if (!savedVoiceChId) {
+        return interaction.editReply({ // Changé en editReply
+            embeds: [errorEmbed("❌ Aucun salon vocal n'est configuré. Utilisez d'abord la commande de configuration du salon vocal.")],
+            ephemeral: true
+        });
+    }
 
-createEvent(guildId, {
-    hostId            : interaction.user.id,
-    channelId         : savedVoiceChId, // On utilise UNIQUEMENT l'ID en mémoire
-    announceChannelId : targetChannel.id, 
-    title             : titre,
-    eventDate,
-    registrationStart,
-    registrationEnd,
-    announceMsgId     : msg.id,
-    discordEventId,
-});
+    createEvent(guildId, {
+        hostId            : interaction.user.id,
+        channelId         : savedVoiceChId,
+        announceChannelId : targetChannel.id, 
+        title             : titre,
+        eventDate,
+        registrationStart,
+        registrationEnd,
+        announceMsgId     : msg.id,
+        discordEventId,
+    });
 
     await interaction.editReply({
       embeds: [
