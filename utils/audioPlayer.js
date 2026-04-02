@@ -5,6 +5,16 @@ async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
+        // Configuration des cookies YouTube depuis la variable d'environnement Railway
+        if (process.env.YT_COOKIES_BASE64) {
+            const decodedCookies = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
+            await play.setToken({
+                youtube: {
+                    cookie: decodedCookies
+                }
+            });
+        }
+
         if (!session.player) {
             session.player = createAudioPlayer({
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
@@ -15,8 +25,11 @@ async function playAudio(session, input, onFinish) {
         let urlToPlay = input.trim();
 
         if (!urlToPlay.startsWith('http')) {
-            console.log(`🔎 Recherche YouTube pour : ${urlToPlay}`);
-            const results = await play.search(urlToPlay, { limit: 1 });
+            // Ajout de " audio lyrics" pour éviter les clips vidéos avec intros
+            const searchQuery = `${urlToPlay} audio lyrics`;
+            console.log(`🔎 Recherche YouTube pour : ${searchQuery}`);
+            
+            const results = await play.search(searchQuery, { limit: 1 });
             
             if (results && results.length > 0) {
                 urlToPlay = results[0].url; 
