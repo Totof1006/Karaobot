@@ -1,10 +1,3 @@
-Ton code pour la commande evenement est déjà très solide car il utilise déjà un deferReply. Le seul risque ici est le délai de traitement entre les options de la commande et le premier reply.
-
-Sur Railway, si le serveur met un peu de temps à parser les dates ou à chercher le salon, l'interaction peut expirer avant d'atteindre ton await interaction.deferReply({ ephemeral: true });.
-
-Voici la correction pour sécuriser l'interaction dès l'entrée de la fonction :
-
-JavaScript
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType,
         EmbedBuilder, GuildScheduledEventEntityType,
         GuildScheduledEventPrivacyLevel }                         = require('discord.js');
