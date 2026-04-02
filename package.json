@@ -16,7 +16,7 @@
     "@discordjs/voice": "^0.19.2",
     "@discordjs/opus": "^0.10.0",
     "@distube/ytdl-core": "latest",
-    "play-dl": "^latest",
+    "play-dl": "latest",
     "libsodium-wrappers": "^0.7.15",
     "prism-media": "^1.3.5"
   }
