@@ -5,14 +5,20 @@ async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
-        // Configuration des cookies YouTube depuis la variable d'environnement Railway
+        // Configuration des cookies YouTube avec nettoyage strict des caractères invisibles
         if (process.env.YT_COOKIES_BASE64) {
-            const decodedCookies = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
-            await play.setToken({
-                youtube: {
-                    cookie: decodedCookies
-                }
-            });
+            try {
+                // Le .trim() sur la variable d'env ET sur le résultat décodé supprime les espaces/sauts de ligne parasites
+                const decodedCookies = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64').toString('utf-8').trim();
+                
+                await play.setToken({
+                    youtube: {
+                        cookie: decodedCookies
+                    }
+                });
+            } catch (cookieError) {
+                console.error("[AudioPlayer] Erreur de décodage des cookies :", cookieError.message);
+            }
         }
 
         if (!session.player) {
