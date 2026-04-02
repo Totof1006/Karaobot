@@ -1,10 +1,3 @@
-Ton code est déjà très bien structuré, mais j'ai identifié le coupable de l'erreur Unknown interaction sur Railway.
-
-Le problème vient du fait que ton code fait beaucoup de choses (recherche du salon, vérification d'occupation, création du Modal) AVANT de répondre à Discord. Si Railway met plus de 3 secondes à faire ces étapes, l'interaction expire.
-
-Voici la correction ciblée : j'ai ajouté un deferReply dès le début pour "bloquer" l'interaction et j'ai ajusté la réponse du Modal.
-
-JavaScript
 const { 
     SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
     EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, 
