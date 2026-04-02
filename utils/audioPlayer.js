@@ -5,11 +5,18 @@ async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
-        // Configuration des cookies YouTube avec nettoyage strict des caractères invisibles
+        // Configuration des cookies YouTube avec nettoyage ultra-strict
         if (process.env.YT_COOKIES_BASE64) {
             try {
-                // Le .trim() sur la variable d'env ET sur le résultat décodé supprime les espaces/sauts de ligne parasites
-                const decodedCookies = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64').toString('utf-8').trim();
+                // 1. On nettoie les espaces/sauts de ligne potentiels dans la variable d'env elle-même
+                const base64String = process.env.YT_COOKIES_BASE64.replace(/\s/g, '');
+                
+                // 2. On décode le Base64
+                let decodedCookies = Buffer.from(base64String, 'base64').toString('utf-8');
+                
+                // 3. On supprime TOUS les retours à la ligne (\r, \n) et tabulations (\t) du texte décodé
+                // C'est l'étape cruciale pour éviter ERR_INVALID_CHAR dans les headers HTTP
+                decodedCookies = decodedCookies.replace(/[\r\n\t]/gm, '').trim();
                 
                 await play.setToken({
                     youtube: {
