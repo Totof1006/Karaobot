@@ -93,8 +93,12 @@ async function playAudio(session, input, onFinish) {
             return onFinish();
         }
 
-        // 3. Streaming
-        const stream = await play.stream(urlToPlay, { discordPlayerCompatible: true });
+        // 3. Streaming (CORRECTION : Ajout de htm: true pour forcer l'usage des cookies)
+        const stream = await play.stream(urlToPlay, { 
+            discordPlayerCompatible: true,
+            htm: true 
+        });
+
         const resource = createAudioResource(stream.stream, { 
             inputType: stream.type, 
             inlineVolume: true 
