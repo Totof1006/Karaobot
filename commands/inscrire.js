@@ -47,9 +47,11 @@ async function refreshAnnouncement(interaction, guildId) {
 
 async function showRegistrationModal(interaction) {
     const event = getEvent(interaction.guildId);
-    if (!event) return interaction.reply({ embeds: [errorEmbed('Aucun événement planifié !')], ephemeral: true });
+    if (!event) return interaction.reply({ 
+        embeds: [errorEmbed('Aucun événement planifié !')], 
+        flags: 64 // ✅ CORRECTION
+    });
 
-    // On récupère les chansons existantes SI l'utilisateur est déjà inscrit
     const alreadyRegistered = event.registrations.find(r => r.userId === interaction.user.id);
     const existing = alreadyRegistered?.songs || [];
 
@@ -63,9 +65,9 @@ async function showRegistrationModal(interaction) {
         return new ActionRowBuilder().addComponents(
             new TextInputBuilder()
                 .setCustomId(`song_${i}`)
-                .setLabel(`Chanson n°${i + 1} (Titre Artiste)`) // Changement ici
+                .setLabel(`Chanson n°${i + 1} (Titre Artiste)`)
                 .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Ex: Ailleurs Orelsan ou Lose Yourself Eminem') // Changement ici
+                .setPlaceholder('Ex: Ailleurs Orelsan ou Lose Yourself Eminem')
                 .setValue(value)
                 .setRequired(i === 0)
         );
@@ -73,13 +75,13 @@ async function showRegistrationModal(interaction) {
 
     modal.addComponents(...fields);
     
-    // IMPORTANT : On envoie le modal sans deferReply pour éviter l'échec d'interaction
+    // Pas de deferReply ici (impossible avec showModal)
     await interaction.showModal(modal);
 }
 
 async function handleModalSubmit(interaction) {
-    // Ici on diffère car la recherche YouTube peut être longue
-    await interaction.deferReply({ ephemeral: true });
+    // ✅ CORRECTION : Utilisation de flags: 64 pour la réponse différée du formulaire
+    await interaction.deferReply({ flags: 64 });
 
     const guildId = interaction.guildId;
     const event = getEvent(guildId);
@@ -96,7 +98,6 @@ async function handleModalSubmit(interaction) {
             let title = input;
             let url = "";
 
-            // Correction de la détection Spotify
             if (input.includes('spotify.com')) {
                 const spType = play.is_spotify_res(input);
                 if (spType && spType !== 'search') {
@@ -123,7 +124,6 @@ async function handleModalSubmit(interaction) {
                 if (info) title = info.video_details.title;
             }
 
-            // Sécurité absolue contre le "undefined"
             finalSongs.push({ 
                 title: title || input, 
                 url: url || "", 
@@ -162,7 +162,10 @@ module.exports = {
         .setDescription('🎤 S\'inscrire à l\'événement karaoké'),
     async execute(interaction) {
         const guard = checkCommandChannel(interaction);
-        if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+        if (!guard.ok) return interaction.reply({ 
+            embeds: [errorEmbed(guard.reason)], 
+            flags: 64 // ✅ CORRECTION
+        });
         await showRegistrationModal(interaction);
     },
     showRegistrationModal,
