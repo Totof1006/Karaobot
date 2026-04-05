@@ -1,25 +1,29 @@
 const { Client, GatewayIntentBits, Collection, Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const DB_PATH = '/data/scores.json';
 require('dotenv').config();
 
 // --- SYNCHRONISATION DES COOKIES YOUTUBE ---
-const rawCookies = process.env.YT_COOKIES_BASE64;
-if (rawCookies) {
+if (process.env.YT_COOKIES_BASE64) {
     try {
-        const cookieContent = Buffer.from(rawCookies, 'base64').toString('utf-8');
-        const volumePath = '/data'; 
-        if (!fs.existsSync(volumePath)) fs.mkdirSync(volumePath, { recursive: true });
-        fs.writeFileSync(path.join(volumePath, 'youtube_cookies.txt'), cookieContent);
+        const cookieContent = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
+        // ✅ Correction : S'assurer que le dossier /data existe pour éviter le crash au démarrage
+        if (!fs.existsSync('/data')) fs.mkdirSync('/data', { recursive: true });
+        fs.writeFileSync('/data/youtube_cookies.txt', cookieContent);
         console.log("✅ Fichier youtube_cookies.txt généré dans le volume.");
     } catch (err) {
-        console.error("❌ Erreur cookies :", err.message);
+        console.error("❌ Erreur lors de la génération des cookies :", err.message);
     }
 }
 
-// --- CONTRÔLE ANTI-CRASH ---
-process.on('unhandledRejection', (reason) => console.error('❌ [ERREUR PROMESSE]', reason));
-process.on('uncaughtException', (err) => console.error('❌ [ERREUR FATALE]', err.message));
+// ─── 1. CONTRÔLE ANTI-CRASH (LOGS) ──────────────────────────────────────────
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ [ERREUR PROMESSE]', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('❌ [ERREUR FATALE]', err.message);
+});
 
 const client = new Client({
     intents: [
@@ -29,31 +33,45 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildScheduledEvents,
-        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildPresences, // ✅ Ajouté pour la gestion des rôles/membres
     ],
 });
 
 client.commands = new Collection();
 
-// Chargement des commandes
+// ─── 2. CHARGEMENT DES COMMANDES ─────────────────────────────────────────────
 const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-    const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
-    for (const file of commandFiles) {
+const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
+
+for (const file of commandFiles) {
+    try {
         const command = require(path.join(commandsPath, file));
-        if (command.data && command.execute) client.commands.set(command.data.name, command);
+        if (command.data && command.execute) {
+            client.commands.set(command.data.name, command);
+        }
+    } catch (error) {
+        console.error(`⚠️ Impossible de charger la commande ${file}:`, error.message);
     }
 }
 
-// Chargement des événements
+// ─── 3. CHARGEMENT DES ÉVÉNEMENTS ───────────────────────────────────────────
 const eventsPath = path.join(__dirname, 'events');
-if (fs.existsSync(eventsPath)) {
-    const eventFiles = fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'));
-    for (const file of eventFiles) {
+const eventFiles = fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'));
+
+for (const file of eventFiles) {
+    try {
         const event = require(path.join(eventsPath, file));
-        if (event.once) client.once(event.name, (...args) => event.execute(...args, client));
-        else client.on(event.name, (...args) => event.execute(...args, client));
+        const eventName = event.name === 'ready' ? Events.ClientReady : event.name;
+        
+        if (event.once) {
+            client.once(eventName, (...args) => event.execute(...args, client));
+        } else {
+            client.on(eventName, (...args) => event.execute(...args, client));
+        }
+    } catch (error) {
+        console.error(`⚠️ Erreur sur l'événement ${file}:`, error.message);
     }
 }
 
+// ─── 4. CONTRÔLE DE CONNEXION ────────────────────────────────────────────────
 client.login(process.env.DISCORD_TOKEN);
