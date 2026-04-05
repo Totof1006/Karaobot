@@ -1,9 +1,3 @@
-Voici la version finale et corrigée de ton fichier utils/audioPlayer.js.
-
-C'est ici que nous réglons le problème du "Invalid URL" en passant à un stockage par ID vidéo plutôt qu'en URL complète (qui expirent avec le temps) et en supprimant l'option htm: true qui n'existe pas dans la documentation officielle de play-dl et qui causait des instabilités de stream.
-
-📄 Fichier : utils/audioPlayer.js corrigé
-JavaScript
 const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
 const play = require('play-dl');
 const fs = require('fs');
