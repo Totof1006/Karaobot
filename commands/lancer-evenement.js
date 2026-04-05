@@ -8,18 +8,15 @@ const { errorEmbed }             = require('../utils/embeds');
 const { startButton }            = require('../utils/buttons');
 const { checkSessionChannel }    = require('../utils/channelGuard');
 
-// --- FONCTION DE LANCEMENT (DÉPLACÉE EN HAUT POUR PLUS DE CLARTÉ) ---
+// --- FONCTION DE LANCEMENT ---
 async function launchFromEvent(interaction, event) {
     const guildId = interaction.guildId;
     
-    // Création de la session technique
     const session = createSession(guildId, interaction.user.id, interaction.channelId);
 
-    // Migration des inscrits de l'événement vers la session active
     for (const reg of event.registrations) {
         if (reg.songs && reg.songs.length > 0) {
             addPlayer(session, reg.userId, reg.username);
-            // On injecte les chansons déjà choisies lors de l'inscription
             session.players.find(p => p.userId === reg.userId).songs = reg.songs;
         }
     }
@@ -51,7 +48,6 @@ async function launchFromEvent(interaction, event) {
 }
 
 module.exports = {
-    // Export de la fonction pour interactionCreate si besoin
     launchFromEvent, 
 
     data: new SlashCommandBuilder()
@@ -62,7 +58,8 @@ module.exports = {
     async execute(interaction) {
         const guard = checkSessionChannel(interaction);
         if (!guard.ok) {
-            return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+            // ✅ CORRECTION
+            return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 });
         }
 
         const isLeader = hasRole(interaction.member, ROLE_LEADER);
@@ -71,14 +68,14 @@ module.exports = {
         if (!isLeader && !isModo) {
             return interaction.reply({
                 embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent lancer la session.')],
-                ephemeral: true,
+                flags: 64, // ✅ CORRECTION
             });
         }
 
         if (getSession(interaction.guildId)) {
             return interaction.reply({
                 embeds: [errorEmbed('Une session est déjà en cours !')],
-                ephemeral: true,
+                flags: 64, // ✅ CORRECTION
             });
         }
 
@@ -88,7 +85,6 @@ module.exports = {
         if (event && event.registrations.length >= 2) {
             const notReady = event.registrations.filter(r => !r.songs || r.songs.length < 3);
 
-            // Si certains n'ont pas fini leurs choix
             if (notReady.length > 0) {
                 const names = notReady.map(r => `<@${r.userId}>`).join(', ');
                 return interaction.reply({
@@ -104,12 +100,12 @@ module.exports = {
                                 .setStyle(ButtonStyle.Danger)
                         ),
                     ],
-                    ephemeral: true,
+                    flags: 64, // ✅ CORRECTION
                 });
             }
 
-            // Lancement normal
-            await interaction.deferReply(); // On laisse le temps au bot de traiter
+            // ✅ NOTE : Pas de flags: 64 ici car l'annonce de lancement est publique
+            await interaction.deferReply(); 
             await launchFromEvent(interaction, event);
             return;
         }
@@ -125,7 +121,7 @@ module.exports = {
                             : `ℹ️ Aucun événement planifié. Utilise \`/karaoke\` pour démarrer.`
                     ),
             ],
-            ephemeral: true,
+            flags: 64, // ✅ CORRECTION
         });
     },
 };
