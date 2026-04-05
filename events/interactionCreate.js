@@ -2,7 +2,7 @@ const { EmbedBuilder, InteractionType, Events } = require('discord.js');
 const ytdl = require('@distube/ytdl-core');
 
 // --- IMPORTS DES UTILITAIRES ---
-const { getSession, addPlayer, addVote } = require('../utils/gameState'); // ✅ Ajout de addVote
+const { getSession, addPlayer, addVote } = require('../utils/gameState'); // ✅ addVote rétabli
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { joinButton, startButton } = require('../utils/buttons');
 const { getLyrics } = require('../utils/lyricsSync'); 
@@ -17,12 +17,6 @@ const { assignSpectatorRole, removeKaraokeRoles } = require('../utils/roleManage
 const { checkAnnouncementButton, checkCommandChannel } = require('../utils/channelGuard');
 
 // --- FONCTIONS UTILITAIRES ---
-
-function formatTime(seconds) {
-    const min = Math.floor(seconds / 60);
-    const sec = seconds % 60;
-    return `${min}:${sec.toString().padStart(2, '0')}`;
-}
 
 async function getAudioDuration(url) {
     if (!url || !ytdl.validateURL(url)) return 0;
@@ -46,7 +40,7 @@ module.exports = {
     async execute(interaction, client) {
         const { guildId, user, customId } = interaction;
 
-        // ── 1. COMMANDES SLASH ──────────────────────────────────────────
+        // ── 1. COMMANDES SLASH ──
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
@@ -62,25 +56,23 @@ module.exports = {
             return;
         }
 
-        // ── 2. SOUMISSION DE MODAL ──────────────────────────────────────
+        // ── 2. SOUMISSION DE MODAL ──
         if (interaction.type === InteractionType.ModalSubmit) {
             if (interaction.customId === 'modal_register_songs') {
-                // ✅ Sécurité anti-crash : on vérifie l'état de l'interaction
-                if (interaction.replied || interaction.deferred) return;
+                if (interaction.replied || interaction.deferred) return; // ✅ Sécurité
                 await handleModalSubmit(interaction);
             }
             return;
         }
 
-        // ── 3. FILTRE BOUTONS ───────────────────────────────────────────
+        // ── 3. FILTRE BOUTONS ──
         if (!interaction.isButton()) return;
 
         try {
-            // ── 4. BOUTONS : SYSTÈME DE VOTE (Rétabli) ──────────────────
+            // ✅ GESTION DES VOTES (Rétabli)
             if (customId.startsWith('vote_')) {
                 const score = parseInt(customId.split('_')[1]);
                 const session = getSession(guildId);
-
                 if (!session) return interaction.reply({ content: "❌ Aucune session active.", flags: 64 });
 
                 const success = addVote(session, user.id, score);
@@ -91,27 +83,22 @@ module.exports = {
                 }
             }
 
-            // ── 5. BOUTONS : MODE ENTRAÎNEMENT (Vérification) ───────────
-            // ✅ Correction ID : check_ pour correspondre à entrainement.js
+            // ✅ GESTION ENTRAÎNEMENT (Correction ID check_)
             if (customId.startsWith('check_')) {
-                await interaction.deferReply({ flags: 64 }); // ✅ Passage au Flag 64
+                await interaction.deferReply({ flags: 64 }); // ✅ Flag 64
 
                 const parts = customId.split('_');
                 const songIndex = parseInt(parts[1]) - 1;
                 const userId = parts[2];
 
-                if (user.id !== userId) {
-                    return interaction.editReply({ content: "❌ Ce n'est pas votre session." });
-                }
+                if (user.id !== userId) return interaction.editReply({ content: "❌ Ce n'est pas votre session." });
 
                 const session = global.trainingSessions?.get(userId);
-                if (!session || !session.songs[songIndex]) {
-                    return interaction.editReply({ content: "❌ Musique introuvable." });
-                }
+                if (!session || !session.songs[songIndex]) return interaction.editReply({ content: "❌ Musique introuvable." });
 
                 const songQuery = session.songs[songIndex];
-                const youtubeDuration = await getAudioDuration(songQuery); 
-                const apiDuration = 180; // Valeur exemple ou récupérée via ton API
+                const youtubeDuration = await getAudioDuration(songQuery);
+                const apiDuration = 180; // Exemple
 
                 const diff = Math.abs(youtubeDuration - apiDuration);
                 const isMatch = diff <= 5;
@@ -120,28 +107,27 @@ module.exports = {
                     .setTitle(`Vérification : ${songQuery}`)
                     .setColor(isMatch ? 0x00FF00 : 0xFF0000)
                     .addFields(
-                        { name: '⏱️ API', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Vidéo (YouTube)', value: formatTime(youtubeDuration), inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
+                        { name: '⏱️ API', value: `${Math.floor(apiDuration/60)}:${(apiDuration%60).toString().padStart(2, '0')}`, inline: true },
+                        { name: '📺 Vidéo', value: `${Math.floor(youtubeDuration/60)}:${(youtubeDuration%60).toString().padStart(2, '0')}`, inline: true },
+                        { name: '📊 Verdict', value: isMatch ? '✅ **Validé !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
                     );
 
                 return await interaction.editReply({ embeds: [embed] });
             }
 
-            // ── 6. BOUTONS : GESTION ÉVÉNEMENT ──────────────────────────────
             if (customId === 'event_register') {
                 const guard = checkAnnouncementButton(interaction);
-                if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 }); // ✅ Flag 64
+                if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 });
                 await showRegistrationModal(interaction);
             }
             
             if (customId === 'event_unregister') {
                 const event = getEvent(guildId);
-                if (!event || !isRegistrationOpen(event)) return interaction.reply({ embeds: [errorEmbed('Inscriptions fermées.')], flags: 64 }); // ✅ Flag 64
+                if (!event || !isRegistrationOpen(event)) return interaction.reply({ embeds: [errorEmbed('Inscriptions fermées.')], flags: 64 });
                 if (unregisterPlayer(guildId, user.id)) {
                     await removeKaraokeRoles(interaction.guild, user.id);
                     await refreshAnnouncement(interaction, guildId);
-                    return interaction.reply({ embeds: [successEmbed('Désinscrit.')], flags: 64 }); // ✅ Flag 64
+                    return interaction.reply({ embeds: [successEmbed('Désinscrit.')], flags: 64 });
                 }
             }
 
