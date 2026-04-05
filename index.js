@@ -3,34 +3,33 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// --- SYNCHRONISATION DES COOKIES YOUTUBE ---
-// On vérifie les deux noms possibles pour être sûr
+// --- SYNCHRONISATION DES COOKIES YOUTUBE (Version Volume /data) ---
 const rawCookies = process.env.YT_COOKIES_BASE64 || process.env.YOUTUBE_COOKIES;
 
 if (rawCookies) {
     try {
         let cookieContent;
-        
-        // Si c'est du Base64 (on vérifie s'il y a des caractères typiques ou si c'est YT_COOKIES_BASE64)
         if (process.env.YT_COOKIES_BASE64) {
             cookieContent = Buffer.from(rawCookies, 'base64').toString('utf-8');
         } else {
-            cookieContent = rawCookies; // Texte brut
+            cookieContent = rawCookies;
         }
 
-        // Définition du chemin (Volume Railway /data ou local /app/data)
-        const dataDir = path.join(__dirname, 'data');
-        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        // On utilise ici le chemin ABSOLU /data correspondant à ta capture n°2
+        const volumePath = '/data';
+        if (!fs.existsSync(volumePath)) {
+            fs.mkdirSync(volumePath, { recursive: true });
+        }
         
-        const cookiePath = path.join(dataDir, 'youtube_cookies.txt');
-        fs.writeFileSync(cookiePath, cookieContent);
+        const cookieFile = path.join(volumePath, 'youtube_cookies.txt');
+        fs.writeFileSync(cookieFile, cookieContent);
         
-        console.log(`✅ Fichier youtube_cookies.txt généré avec succès dans : ${cookiePath}`);
+        console.log(`✅ Fichier généré dans le volume : ${cookieFile}`);
     } catch (err) {
-        console.error("❌ Erreur lors de la génération des cookies :", err.message);
+        console.error("❌ Erreur cookies :", err.message);
     }
 } else {
-    console.warn("⚠️ Aucune variable de cookies (YT_COOKIES_BASE64 ou YOUTUBE_COOKIES) trouvée.");
+    console.warn("⚠️ YT_COOKIES_BASE64 est vide ou non détecté par Railway.");
 }
 
 // ─── 1. CONTRÔLE ANTI-CRASH ──────────────────────────────────────────
@@ -66,7 +65,7 @@ if (fs.existsSync(commandsPath)) {
                 client.commands.set(command.data.name, command);
             }
         } catch (error) {
-            console.error(`⚠️ Impossible de charger la commande ${file}:`, error.message);
+            console.error(`⚠️ Commande ${file}:`, error.message);
         }
     }
 }
@@ -78,23 +77,17 @@ if (fs.existsSync(eventsPath)) {
     for (const file of eventFiles) {
         try {
             const event = require(path.join(eventsPath, file));
-            // Correction de la récupération du nom pour éviter l'erreur "Events is not defined"
-            const eventName = event.name; 
-            
-            if (eventName) {
+            if (event.name) {
                 if (event.once) {
-                    client.once(eventName, (...args) => event.execute(...args, client));
+                    client.once(event.name, (...args) => event.execute(...args, client));
                 } else {
-                    client.on(eventName, (...args) => event.execute(...args, client));
+                    client.on(event.name, (...args) => event.execute(...args, client));
                 }
             }
         } catch (error) {
-            console.error(`⚠️ Erreur sur l'événement ${file}:`, error.message);
+            console.error(`⚠️ Événement ${file}:`, error.message);
         }
     }
 }
 
-// ─── 4. CONNEXION ───────────────────────────────────────────────────────────
-client.login(process.env.DISCORD_TOKEN).catch(err => {
-    console.error('❌ [LOGIN ERROR]:', err.message);
-});
+client.login(process.env.DISCORD_TOKEN);
