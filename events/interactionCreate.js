@@ -2,7 +2,7 @@ const { EmbedBuilder, InteractionType, Events } = require('discord.js');
 const ytdl = require('@distube/ytdl-core');
 
 // --- IMPORTS DES UTILITAIRES ---
-const { getSession, addPlayer, addVote } = require('../utils/gameState'); // ✅ addVote rétabli
+const { getSession, addPlayer, addVote } = require('../utils/gameState'); 
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { joinButton, startButton } = require('../utils/buttons');
 const { getLyrics } = require('../utils/lyricsSync'); 
@@ -59,7 +59,6 @@ module.exports = {
         // ── 2. SOUMISSION DE MODAL ──────────────────────────────────────
         if (interaction.type === InteractionType.ModalSubmit) {
             if (interaction.customId === 'modal_register_songs') {
-                // ✅ Sécurité anti-crash : évite de répondre deux fois
                 if (interaction.replied || interaction.deferred) return;
                 await handleModalSubmit(interaction);
             }
@@ -70,7 +69,7 @@ module.exports = {
         if (!interaction.isButton()) return;
 
         try {
-            // ✅ BOUTONS : SYSTÈME DE VOTE (Rétabli)
+            // ✅ BOUTONS : SYSTÈME DE VOTE
             if (customId.startsWith('vote_')) {
                 const score = parseInt(customId.split('_')[1]);
                 const session = getSession(guildId);
@@ -85,13 +84,12 @@ module.exports = {
                 }
             }
 
-            // ✅ BOUTONS : MODE ENTRAÎNEMENT (Vérification)
-            // Harmonisé sur "check_train_" pour correspondre à ton entrainement.js
+            // ✅ BOUTONS : MODE ENTRAÎNEMENT
             if (customId.startsWith('check_train_')) {
-                await interaction.deferReply({ flags: 64 }); // ✅ Passage au Flag 64
+                await interaction.deferReply({ flags: 64 });
 
                 const parts = customId.split('_');
-                const songIndex = parseInt(parts[2]) - 1; // Ajusté car ID est check_train_index_user
+                const songIndex = parseInt(parts[2]) - 1;
                 const userId = parts[3];
 
                 if (user.id !== userId) {
@@ -105,7 +103,7 @@ module.exports = {
 
                 const songQuery = session.songs[songIndex];
                 const youtubeDuration = await getAudioDuration(songQuery); 
-                const apiDuration = 180; // Valeur exemple
+                const apiDuration = 180;
 
                 const diff = Math.abs(youtubeDuration - apiDuration);
                 const isMatch = diff <= 5;
@@ -116,4 +114,31 @@ module.exports = {
                     .addFields(
                         { name: '⏱️ API', value: `${Math.floor(apiDuration/60)}:${(apiDuration%60).toString().padStart(2, '0')}`, inline: true },
                         { name: '📺 Vidéo', value: `${Math.floor(youtubeDuration/60)}:${(youtubeDuration%60).toString().padStart(2, '0')}`, inline: true },
-                        { name: '📊 Verdict', value: is
+                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
+                    );
+
+                return await interaction.editReply({ embeds: [embed] });
+            }
+
+            // ── 4. BOUTONS : GESTION ÉVÉNEMENT ──────────────────────────────
+            if (customId === 'event_register') {
+                const guard = checkAnnouncementButton(interaction);
+                if (!guard.ok) return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 });
+                await showRegistrationModal(interaction);
+            }
+            
+            if (customId === 'event_unregister') {
+                const event = getEvent(guildId);
+                if (!event || !isRegistrationOpen(event)) return interaction.reply({ embeds: [errorEmbed('Inscriptions fermées.')], flags: 64 });
+                if (unregisterPlayer(guildId, user.id)) {
+                    await removeKaraokeRoles(interaction.guild, user.id);
+                    await refreshAnnouncement(interaction, guildId);
+                    return interaction.reply({ embeds: [successEmbed('Désinscrit.')], flags: 64 });
+                }
+            }
+
+        } catch (err) {
+            console.error('[Global Button Error]', err);
+        }
+    }, // Fin de execute
+}; // Fin de module.exports
