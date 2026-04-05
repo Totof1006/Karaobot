@@ -4,123 +4,119 @@ const path = require('path');
 const DB_PATH = '/data/scores.json';
 const HISTORY_PATH = '/data/history.json';
 
-function loadDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFileSync(DB_PATH, JSON.stringify({}));
-    return {};
-  }
-  try {
-    return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-  } catch (err) {
-    console.error('[scoreDB] Fichier scores.json corrompu, réinitialisation :', err.message);
-    fs.writeFileSync(DB_PATH, JSON.stringify({}));
-    return {};
-  }
+// ─── LECTURE / ÉCRITURE ───────────────────────────────────────────────────────
+
+function loadJSON(filePath) {
+    if (!fs.existsSync(filePath)) {
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(filePath, JSON.stringify({}));
+        return {};
+    }
+    try {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        return JSON.parse(data || '{}'); // ✅ Sécurité si le fichier est vide
+    } catch (err) {
+        console.error(`[scoreDB] Erreur sur ${path.basename(filePath)} :`, err.message);
+        return {};
+    }
 }
 
-function saveDB(db) {
-  const tmp = DB_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DB_PATH);
+function saveJSON(filePath, data) {
+    try {
+        const tmp = filePath + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+        fs.renameSync(tmp, filePath);
+    } catch (err) {
+        console.error(`[scoreDB] Erreur écriture sur ${path.basename(filePath)} :`, err.message);
+    }
 }
 
-function saveHistory(h) {
-  const tmp = HISTORY_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(h, null, 2));
-  fs.renameSync(tmp, HISTORY_PATH);
-}
+// ─── LOGIQUE DES SCORES ───────────────────────────────────────────────────────
 
-function loadHistory() {
-  if (!fs.existsSync(HISTORY_PATH)) {
-    fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
-    fs.writeFileSync(HISTORY_PATH, JSON.stringify({}));
-    return {};
-  }
-  try {
-    return JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf-8'));
-  } catch (err) {
-    console.error('[scoreDB] Fichier history.json corrompu, réinitialisation :', err.message);
-    fs.writeFileSync(HISTORY_PATH, JSON.stringify({}));
-    return {};
-  }
-}
-
-// Mettre à jour les scores globaux après une session
 function updateGlobalScores(guildId, players) {
-  const db = loadDB();
-  if (!db[guildId]) db[guildId] = {};
+    if (!players || players.length === 0) return;
 
-  for (const player of players) {
-    if (!db[guildId][player.userId]) {
-      db[guildId][player.userId] = {
-        username: player.username,
-        totalScore: 0,
-        gamesPlayed: 0,
-        wins: 0,
-        bestScore: 0,
-      };
+    const db = loadJSON(DB_PATH);
+    if (!db[guildId]) db[guildId] = {};
+
+    // 1. Mise à jour des stats individuelles
+    for (const player of players) {
+        const uid = String(player.userId);
+        if (!db[guildId][uid]) {
+            db[guildId][uid] = {
+                username: player.username,
+                totalScore: 0,
+                gamesPlayed: 0,
+                wins: 0,
+                bestScore: 0,
+            };
+        }
+        
+        const entry = db[guildId][uid];
+        entry.username    = player.username; // ✅ Update username si changé
+        entry.totalScore += (player.score || 0);
+        entry.gamesPlayed++;
+        
+        if (player.score > (entry.bestScore || 0)) {
+            entry.bestScore = player.score;
+        }
     }
-    const entry = db[guildId][player.userId];
-    entry.username    = player.username;
-    entry.totalScore += player.score;
-    entry.gamesPlayed++;
-    if (player.score > entry.bestScore) entry.bestScore = player.score;
-  }
 
-  // ── Mise à jour du gagnant ──
-  const sorted = [...players].sort((a, b) => b.score - a.score);
-  
-  if (sorted.length > 0 && sorted[0].score > 0) { // On ne gagne que si on a des points
-    const winnerEntry = db[guildId][sorted[0].userId];
-    if (winnerEntry) {
-        winnerEntry.wins = (winnerEntry.wins || 0) + 1;
+    // 2. Détermination du gagnant (celui qui a le plus gros score cette session)
+    const sorted = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    if (sorted[0] && sorted[0].score > 0) {
+        const winnerId = String(sorted[0].userId);
+        if (db[guildId][winnerId]) {
+            db[guildId][winnerId].wins = (db[guildId][winnerId].wins || 0) + 1;
+        }
     }
-  }
 
-  saveDB(db);
+    saveJSON(DB_PATH, db);
 
-  // ── Sauvegarder dans l'historique des sessions ────────────────────────────
-  const h = loadHistory();
-  if (!h[guildId]) h[guildId] = [];
-  h[guildId].unshift({
-    date    : new Date().toISOString(),
-    winner  : sorted[0] ? { userId: sorted[0].userId, username: sorted[0].username, score: sorted[0].score } : null,
-    players : sorted.map(p => ({ userId: p.userId, username: p.username, score: p.score })),
-  });
-  h[guildId] = h[guildId].slice(0, 10); // garder les 10 dernières
-  saveHistory(h);
+    // 3. Mise à jour de l'historique
+    const history = loadJSON(HISTORY_PATH);
+    if (!Array.isArray(history[guildId])) history[guildId] = [];
+
+    history[guildId].unshift({
+        date    : new Date().toISOString(),
+        winner  : sorted[0] ? { userId: String(sorted[0].userId), username: sorted[0].username, score: sorted[0].score } : null,
+        players : sorted.map(p => ({ userId: String(p.userId), username: p.username, score: p.score })),
+    });
+
+    // On garde les 20 dernières sessions (plus généreux que 10)
+    history[guildId] = history[guildId].slice(0, 20);
+    saveJSON(HISTORY_PATH, history);
 }
+
+// ─── RÉCUPÉRATION DES DONNÉES ─────────────────────────────────────────────────
 
 function getGlobalLeaderboard(guildId, limit = 10) {
-  const db    = loadDB();
-  const guild = db[guildId] || {};
-  return Object.entries(guild)
-    .map(([userId, data]) => ({ userId, ...data }))
-    .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, limit)
-    .map((entry, i) => ({ rank: i + 1, ...entry }));
-}
-
-function getWeeklyStar(guildId) {
-  const db      = loadDB();
-  const guild   = db[guildId] || {};
-  const entries = Object.entries(guild).map(([userId, data]) => ({ userId, ...data }));
-  if (entries.length === 0) return null;
-  return entries.sort((a, b) => b.wins - a.wins)[0];
+    const db = loadJSON(DB_PATH);
+    const guildData = db[guildId] || {};
+    
+    return Object.entries(guildData)
+        .map(([userId, data]) => ({ userId, ...data }))
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .slice(0, limit)
+        .map((entry, i) => ({ rank: i + 1, ...entry }));
 }
 
 function getPlayerStats(guildId, userId) {
-  const db = loadDB();
-  return db[guildId]?.[userId] || null;
+    const db = loadJSON(DB_PATH);
+    return db[guildId]?.[String(userId)] || null;
 }
 
 function getSessionHistory(guildId, limit = 5) {
-  const h = loadHistory();
-  return (h[guildId] || []).slice(0, limit);
+    const history = loadJSON(HISTORY_PATH);
+    const guildHistory = history[guildId] || [];
+    return Array.isArray(guildHistory) ? guildHistory.slice(0, limit) : [];
 }
 
 module.exports = {
-  updateGlobalScores, getGlobalLeaderboard,
-  getPlayerStats, getSessionHistory,
+    updateGlobalScores,
+    getGlobalLeaderboard,
+    getPlayerStats,
+    getSessionHistory,
 };
