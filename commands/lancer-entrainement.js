@@ -8,8 +8,9 @@ module.exports = {
 
     async execute(interaction) {
         // --- CORRECTION : On informe Discord que le traitement va prendre du temps ---
+        // Utilisation de flags: [64] au lieu de ephemeral: true pour les nouveaux standards.
         // Cela donne 15 minutes au bot pour répondre au lieu de 3 secondes.
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: [64] });
 
         const session = global.trainingSessions?.get(interaction.user.id);
         
@@ -34,6 +35,7 @@ module.exports = {
                 .setColor(0xFF69B4)
                 .setFooter({ text: "Le bot synchronise les paroles..." });
 
+            // On envoie dans le salon car l'interaction principale est "occupée" par le defer
             await interaction.channel.send({ embeds: [startEmbed] });
 
             // On utilise la fonction playAudio (qui gère déjà play-dl et le volume de cache)
@@ -45,6 +47,7 @@ module.exports = {
             });
 
             // --- CALCUL DU SCORE ---
+            // Note : precisionTicks est incrémenté dans le voiceReceiver
             const score = Math.min(Math.round((session.precisionTicks / 350) * 100), 100);
             
             const resultEmbed = new EmbedBuilder()
@@ -63,7 +66,7 @@ module.exports = {
 
         await interaction.channel.send("🎉 **Session d'entraînement terminée !** Tu peux relancer avec `/entrainement`.");
         
-        // On finalise l'interaction de l'utilisateur
+        // On finalise l'interaction de l'utilisateur (ferme l'état "Le bot réfléchit")
         await interaction.editReply({ content: "✅ Test terminé avec succès." });
     }
 };
