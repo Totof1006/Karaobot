@@ -1,9 +1,3 @@
-Voici la version corrigée de ton fichier commands/lancer-test.js.
-
-L'objectif ici est de s'assurer que le bot ne reste pas bloqué si une musique échoue et d'harmoniser la gestion des réponses pour éviter les erreurs de "déjà répondu" (Acknowledged).
-
-📄 Fichier : commands/lancer-test.js corrigé
-JavaScript
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { playAudio } = require('../utils/audioPlayer');
 
