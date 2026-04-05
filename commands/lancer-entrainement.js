@@ -1,3 +1,9 @@
+Voici la version corrigée de ton fichier commands/lancer-test.js.
+
+L'objectif ici est de s'assurer que le bot ne reste pas bloqué si une musique échoue et d'harmoniser la gestion des réponses pour éviter les erreurs de "déjà répondu" (Acknowledged).
+
+📄 Fichier : commands/lancer-test.js corrigé
+JavaScript
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { playAudio } = require('../utils/audioPlayer');
 
@@ -7,26 +13,31 @@ module.exports = {
         .setDescription('▶️ Lance la séquence d\'entraînement'),
 
     async execute(interaction) {
-        // --- CORRECTION : On informe Discord que le traitement va prendre du temps ---
-        // Utilisation de flags: [64] au lieu de ephemeral: true pour les nouveaux standards.
-        // Cela donne 15 minutes au bot pour répondre au lieu de 3 secondes.
-        await interaction.deferReply({ flags: [64] });
+        // ✅ Utilisation de flags: 64 (nombre entier sans crochet) pour le standard v14
+        // On prévient Discord que le traitement peut être long (jusqu'à 15min)
+        await interaction.deferReply({ flags: 64 });
 
         const session = global.trainingSessions?.get(interaction.user.id);
         
-        // Vérification de la connexion et de l'état
+        // Vérification de la session et de la présence d'une connexion vocale active
         if (!session || !session.connection) {
-            return interaction.editReply({ content: "❌ Session introuvable. Fais `/entrainement`." });
+            return interaction.editReply({ content: "❌ Session introuvable ou bot non connecté. Fais `/entrainement` d'abord." });
         }
 
-        // On informe l'utilisateur via editReply (puisqu'on a fait un deferReply)
+        // Vérification que la liste des chansons n'est pas vide pour éviter l'erreur Invalid URL
+        if (!session.songs || session.songs.length === 0) {
+            return interaction.editReply({ content: "❌ Ta liste de chansons est vide. Relance `/entrainement`." });
+        }
+
         await interaction.editReply({ content: "🎤 Analyse des titres et lancement du test..." });
 
         for (let i = 0; i < session.songs.length; i++) {
-            // Sécurité : Si l'utilisateur a supprimé la session entre deux musiques
+            // Sécurité : Si la session a été nettoyée entre temps
             if (!global.trainingSessions.has(interaction.user.id)) break;
 
             const trackText = session.songs[i];
+            
+            // Initialisation des données de score pour cette piste
             session.precisionTicks = 0;
 
             const startEmbed = new EmbedBuilder()
@@ -35,19 +46,26 @@ module.exports = {
                 .setColor(0xFF69B4)
                 .setFooter({ text: "Le bot synchronise les paroles..." });
 
-            // On envoie dans le salon car l'interaction principale est "occupée" par le defer
+            // Envoi dans le salon textuel (le deferReply occupe déjà la réponse privée)
             await interaction.channel.send({ embeds: [startEmbed] });
 
-            // On utilise la fonction playAudio (qui gère déjà play-dl et le volume de cache)
-            // On attend la fin de la musique (resolve) avant de passer à la suivante
+            // ✅ Gestion robuste de la lecture
             await new Promise(resolve => {
+                // On définit un timeout de sécurité (ex: 10 minutes) pour ne pas bloquer le bot
+                // si playAudio n'appelle jamais le callback onFinish
+                const safetyTimeout = setTimeout(() => {
+                    console.error(`⚠️ Timeout de sécurité pour : ${trackText}`);
+                    resolve();
+                }, 600000); 
+
                 playAudio(session, trackText, () => {
+                    clearTimeout(safetyTimeout);
                     resolve();
                 });
             });
 
             // --- CALCUL DU SCORE ---
-            // Note : precisionTicks est incrémenté dans le voiceReceiver
+            // Calcul basé sur les ticks de détection vocale
             const score = Math.min(Math.round((session.precisionTicks / 350) * 100), 100);
             
             const resultEmbed = new EmbedBuilder()
@@ -58,7 +76,7 @@ module.exports = {
 
             await interaction.channel.send({ embeds: [resultEmbed] });
 
-            // Petite pause de 2 secondes entre les musiques
+            // Pause de transition entre les musiques
             if (i < session.songs.length - 1) {
                 await new Promise(r => setTimeout(r, 2000));
             }
@@ -66,7 +84,7 @@ module.exports = {
 
         await interaction.channel.send("🎉 **Session d'entraînement terminée !** Tu peux relancer avec `/entrainement`.");
         
-        // On finalise l'interaction de l'utilisateur (ferme l'état "Le bot réfléchit")
+        // On ferme proprement l'état "Le bot réfléchit"
         await interaction.editReply({ content: "✅ Test terminé avec succès." });
     }
 };
