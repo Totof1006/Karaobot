@@ -43,9 +43,12 @@ module.exports = {
                 await command.execute(interaction);
             } catch (err) {
                 console.error('[Slash Error]', err);
-                if (!interaction.replied && !interaction.deferred) {
-                    // ✅ Utilisation de flags: 64 pour remplacer ephemeral: true (Standard v14+)
-                    await interaction.reply({ embeds: [errorEmbed('Erreur lors de la commande.')], flags: 64 });
+                // ✅ CORRECTION : Gestion si l'interaction est déjà différée ou répondue
+                const payload = { embeds: [errorEmbed('Une erreur est survenue lors de l\'exécution de la commande.')], flags: 64 };
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(payload).catch(() => null);
+                } else {
+                    await interaction.reply(payload).catch(() => null);
                 }
             }
             return;
@@ -53,9 +56,6 @@ module.exports = {
 
         // ── 2. SOUMISSION DE MODAL ──
         if (interaction.type === InteractionType.ModalSubmit) {
-            
-            // ✅ GARDE-FOU : Si le modal provient de l'entraînement, on sort immédiatement.
-            // Cela permet à .awaitModalSubmit() dans entrainement.js de capturer l'événement sans conflit.
             if (interaction.customId.startsWith('modal_train_')) return;
 
             if (interaction.customId === 'modal_register_songs') {
@@ -72,7 +72,6 @@ module.exports = {
         const { customId } = interaction;
 
         try {
-            // Bouton d'inscription (Vient de la commande inscrire)
             if (customId === 'btn_register') {
                 const inscrire = client.commands.get('inscrire');
                 if (inscrire && inscrire.showRegistrationModal) {
@@ -80,9 +79,7 @@ module.exports = {
                 }
             }
 
-            // Boutons de vérification (Viennent de l'entraînement)
             if (customId.startsWith('check_')) {
-                // ✅ Utilisation de flags: 64
                 await interaction.deferReply({ flags: 64 });
 
                 const parts = customId.split('_');
@@ -90,12 +87,12 @@ module.exports = {
                 const userId = parts[2];
 
                 const session = global.trainingSessions?.get(userId);
-                if (!session) return interaction.editReply({ content: "❌ Session expirée. Relancez la commande." });
+                // ✅ CORRECTION : Ajout de flags: 64 si editReply échoue ou message d'erreur
+                if (!session) return interaction.editReply({ content: "❌ Session expirée ou inexistante. Relancez la commande." });
 
                 const trackInput = session.songs[index];
-                if (!trackInput) return interaction.editReply({ content: "❌ Musique introuvable." });
+                if (!trackInput) return interaction.editReply({ content: "❌ Musique introuvable dans votre session." });
 
-                // --- LE COMPARATIF ---
                 const youtubeDuration = await getAudioDuration(trackInput);
                 let apiDuration = 0;
                 const localLyrics = getLyrics(trackInput); 
@@ -126,7 +123,7 @@ module.exports = {
                 } else if (isMatch) {
                     embed.setDescription("✅ **Verdict** : Les durées correspondent ! Le karaoké sera parfaitement synchronisé.");
                 } else {
-                    embed.setDescription(`⚠️ **Verdict** : Écart de **${Math.round(diff)}s**. Attention, les paroles risquent d'être décalées par rapport à la vidéo.`);
+                    embed.setDescription(`⚠️ **Verdict** : Écart de **${Math.round(diff)}s**. Attention, les paroles risquent d'être décalées.`);
                 }
 
                 return await interaction.editReply({ embeds: [embed] });
@@ -134,7 +131,12 @@ module.exports = {
             
         } catch (err) {
             console.error('[Button Error]', err);
-            if (interaction.deferred) await interaction.editReply({ content: "Une erreur est survenue lors de la vérification." });
+            // ✅ CORRECTION : Assurer une réponse propre en cas de crash bouton
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ content: "Une erreur critique est survenue." }).catch(() => null);
+            } else {
+                await interaction.reply({ content: "Une erreur est survenue.", flags: 64 }).catch(() => null);
+            }
         }
     },
 };
