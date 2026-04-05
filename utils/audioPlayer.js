@@ -1,3 +1,6 @@
+Voici le dernier fichier, audioPlayer.js, corrigé avec les sécurités nécessaires pour éviter l'erreur Invalid URL et garantir que tes cookies sont utilisés correctement.
+
+JavaScript
 const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
 const play = require('play-dl');
 const fs = require('fs');
@@ -87,17 +90,28 @@ async function playAudio(session, input, onFinish) {
             }
         }
 
-        // SÉCURITÉ : Vérifier que l'URL n'est pas invalide avant le stream
-        if (!urlToPlay || urlToPlay === 'undefined') {
-            console.error("❌ URL de lecture non définie.");
+        // --- SÉCURITÉ CRITIQUE : Vérifier que l'URL est valide et est une string ---
+        if (!urlToPlay || urlToPlay === 'undefined' || typeof urlToPlay !== 'string') {
+            console.error("❌ Erreur : URL de lecture invalide (undefined ou vide).");
             return onFinish();
         }
 
-        // 3. Streaming (CORRECTION : Ajout de htm: true pour forcer l'usage des cookies)
-        const stream = await play.stream(urlToPlay, { 
-            discordPlayerCompatible: true,
-            htm: true 
-        });
+        // 3. Streaming (CORRECTION : Gestion d'erreur robuste sur le stream)
+        let stream;
+        try {
+            stream = await play.stream(urlToPlay, { 
+                discordPlayerCompatible: true,
+                htm: true // Indispensable pour utiliser l'agent htm avec les cookies
+            });
+        } catch (streamErr) {
+            console.error(`❌ [YouTube] Échec du stream pour ${urlToPlay}:`, streamErr.message);
+            return onFinish();
+        }
+
+        if (!stream || !stream.stream) {
+            console.error("❌ [YouTube] Le flux audio n'a pas pu être généré.");
+            return onFinish();
+        }
 
         const resource = createAudioResource(stream.stream, { 
             inputType: stream.type, 
@@ -109,13 +123,13 @@ async function playAudio(session, input, onFinish) {
 
         session.player.once(AudioPlayerStatus.Idle, onFinish);
         session.player.once('error', (err) => {
-            console.error("[AudioPlayer] Erreur :", err.message);
+            console.error("[AudioPlayer] Erreur pendant la lecture :", err.message);
             session.player.stop(); 
             onFinish();
         });
 
     } catch (error) {
-        console.error("[AudioPlayer] Erreur critique :", error);
+        console.error("[AudioPlayer] Erreur critique système :", error);
         onFinish();
     }
 }
