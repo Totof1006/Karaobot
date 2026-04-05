@@ -1,7 +1,7 @@
 const { EmbedBuilder, InteractionType, Events } = require('discord.js');
 const play = require('play-dl'); 
 
-// IMPORTATION DES UTILITAIRES (Point 1 corrigé ici)
+// IMPORTATION DES UTILITAIRES
 const { getLyrics } = require('../utils/songList'); 
 const { errorEmbed } = require('../utils/embeds');
 
@@ -44,14 +44,20 @@ module.exports = {
             } catch (err) {
                 console.error('[Slash Error]', err);
                 if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ embeds: [errorEmbed('Erreur lors de la commande.')], ephemeral: true });
+                    // ✅ Utilisation de flags: 64 pour remplacer ephemeral: true (Standard v14+)
+                    await interaction.reply({ embeds: [errorEmbed('Erreur lors de la commande.')], flags: 64 });
                 }
             }
             return;
         }
 
-        // ── 2. SOUMISSION DE MODAL (Inscription Chansons) ──
+        // ── 2. SOUMISSION DE MODAL ──
         if (interaction.type === InteractionType.ModalSubmit) {
+            
+            // ✅ GARDE-FOU : Si le modal provient de l'entraînement, on sort immédiatement.
+            // Cela permet à .awaitModalSubmit() dans entrainement.js de capturer l'événement sans conflit.
+            if (interaction.customId.startsWith('modal_train_')) return;
+
             if (interaction.customId === 'modal_register_songs') {
                 const inscrire = client.commands.get('inscrire');
                 if (inscrire && inscrire.handleModalSubmit) {
@@ -61,39 +67,42 @@ module.exports = {
             return;
         }
 
-        // ── 3. BOUTONS (Le comparatif vidéo/lyrics) ──
+        // ── 3. BOUTONS ──
         if (!interaction.isButton()) return;
         const { customId } = interaction;
 
         try {
+            // Bouton d'inscription (Vient de la commande inscrire)
+            if (customId === 'btn_register') {
+                const inscrire = client.commands.get('inscrire');
+                if (inscrire && inscrire.showRegistrationModal) {
+                    return await inscrire.showRegistrationModal(interaction);
+                }
+            }
+
+            // Boutons de vérification (Viennent de l'entraînement)
             if (customId.startsWith('check_')) {
-                // SOLUTION POINT 2 : On diffère la réponse pour éviter le timeout de 3s
-                await interaction.deferReply({ ephemeral: true });
+                // ✅ Utilisation de flags: 64
+                await interaction.deferReply({ flags: 64 });
 
                 const parts = customId.split('_');
                 const index = parseInt(parts[1]) - 1; 
                 const userId = parts[2];
 
-                // On récupère la session d'entraînement
                 const session = global.trainingSessions?.get(userId);
                 if (!session) return interaction.editReply({ content: "❌ Session expirée. Relancez la commande." });
 
                 const trackInput = session.songs[index];
                 if (!trackInput) return interaction.editReply({ content: "❌ Musique introuvable." });
 
-                // --- LE COMPARATIF (Réintégré et sécurisé) ---
-                
-                // A. Durée de la vidéo YouTube
+                // --- LE COMPARATIF ---
                 const youtubeDuration = await getAudioDuration(trackInput);
-                
-                // B. Durée des paroles (.lrc local ou LRCLIB)
                 let apiDuration = 0;
                 const localLyrics = getLyrics(trackInput); 
                 
                 if (localLyrics && localLyrics.durationMs) {
                     apiDuration = Math.round(localLyrics.durationMs / 1000);
                 } else {
-                    // Si pas de .lrc local, on check LRCLIB pour donner une info quand même
                     try {
                         const response = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(trackInput)}`);
                         const results = await response.json();
@@ -120,7 +129,6 @@ module.exports = {
                     embed.setDescription(`⚠️ **Verdict** : Écart de **${Math.round(diff)}s**. Attention, les paroles risquent d'être décalées par rapport à la vidéo.`);
                 }
 
-                // On utilise editReply car on a fait un deferReply au début
                 return await interaction.editReply({ embeds: [embed] });
             }
             
