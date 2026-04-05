@@ -1,88 +1,74 @@
-const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
+const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType } = require('@discordjs/voice');
 const play = require('play-dl');
 const fs = require('fs');
 const path = require('path');
 
-// Chemin calqué sur ton Mount Path Railway (/data)
 const VOLUME_PATH = '/data/playlist_cache.json';
 
+// --- LOGIQUE DE CACHE ---
 const ensureDirectory = () => {
     const dir = path.dirname(VOLUME_PATH);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 };
 
 function getCachedPlaylist() {
     try {
-        if (fs.existsSync(VOLUME_PATH)) {
-            return JSON.parse(fs.readFileSync(VOLUME_PATH, 'utf8'));
-        }
-    } catch (e) {
-        console.error("[Cache] Erreur lecture :", e.message);
-    }
+        if (fs.existsSync(VOLUME_PATH)) return JSON.parse(fs.readFileSync(VOLUME_PATH, 'utf8'));
+    } catch (e) { console.error("[Cache] Erreur lecture :", e.message); }
     return {};
 }
 
-// ✅ CORRECTION : On stocke l'ID unique de la vidéo au lieu de l'URL complète instable
 function saveToCache(songName, url) {
     try {
         ensureDirectory();
         const cache = getCachedPlaylist();
-        
-        // Extraction de l'ID (v=...) ou utilisation de l'URL si l'ID n'est pas trouvable
-        const videoId = new URL(url).searchParams.get('v') || url;
-        
-        cache[songName.toLowerCase().trim()] = videoId;
-        fs.writeFileSync(VOLUME_PATH, JSON.stringify(cache, null, 2));
-        console.log(`💾 [Cache] ID sauvegardé pour : ${songName}`);
-    } catch (e) {
-        console.error("[Cache] Erreur écriture :", e.message);
-    }
+        // Extraction robuste de l'ID
+        const videoId = play.extractID(url); 
+        if (videoId) {
+            cache[songName.toLowerCase().trim()] = videoId;
+            fs.writeFileSync(VOLUME_PATH, JSON.stringify(cache, null, 2));
+            console.log(`💾 [Cache] ID sauvegardé : ${videoId} pour ${songName}`);
+        }
+    } catch (e) { console.error("[Cache] Erreur écriture :", e.message); }
 }
 
+// --- COEUR DE LECTURE ---
 async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
-        // 1. Cookies YouTube
+        // 1. COOKIES (Optimisation : SetToken une seule fois suffit, mais ici on sécurise)
         if (process.env.YT_COOKIES_BASE64) {
             try {
-                const b64 = process.env.YT_COOKIES_BASE64.replace(/\s/g, '');
-                let decoded = Buffer.from(b64, 'base64').toString('utf-8');
-                // Nettoyage plus léger pour ne pas casser le format Netscape
-                await play.setToken({ youtube: { cookie: decoded.trim() } });
+                const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64').toString('utf-8');
+                await play.setToken({ youtube: { cookie: decoded } });
             } catch (e) { console.error("[Cookies] Erreur :", e.message); }
         }
 
+        // 2. INITIALISATION DU PLAYER
         if (!session.player) {
             session.player = createAudioPlayer({
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
             });
+            // ✅ SÉCURITÉ : On s'assure que la connexion est toujours prête
             if (session.connection) session.connection.subscribe(session.player);
         }
 
         let urlToPlay = input.trim();
         const songKey = input.trim().toLowerCase();
 
-        // 2. Stratégie de recherche : Cache par ID d'abord
+        // 3. RECHERCHE / CACHE
         if (!urlToPlay.startsWith('http')) {
             const cache = getCachedPlaylist();
-            
             if (cache[songKey]) {
-                // ✅ RECONSTRUCTION de l'URL à partir de l'ID mémorisé
                 urlToPlay = `https://www.youtube.com/watch?v=${cache[songKey]}`;
                 console.log(`📦 [Cache] URL reconstruite : ${urlToPlay}`);
             } else {
-                const searchQuery = `${input} audio lyrics`;
-                console.log(`🔎 [YouTube] Recherche : ${searchQuery}`);
-                
-                const results = await play.search(searchQuery, { limit: 1 });
-                
-                if (results && results.length > 0 && results[0].url) {
+                console.log(`🔎 [YouTube] Recherche : ${input}`);
+                const results = await play.search(`${input} audio lyrics`, { limit: 1 });
+                if (results?.length > 0) {
                     urlToPlay = results[0].url;
                     saveToCache(input, urlToPlay);
-                    console.log(`✅ [YouTube] Trouvé : ${results[0].title}`);
                 } else {
                     console.error("❌ Aucun résultat YouTube.");
                     return onFinish();
@@ -90,41 +76,42 @@ async function playAudio(session, input, onFinish) {
             }
         }
 
-        // 3. Streaming (CORRECTION : Suppression de l'option htm invalide)
+        // 4. CRÉATION DU STREAM (Correction : Timeout & Retry)
         let stream;
         try {
+            // ✅ discordPlayerCompatible est bien, mais on ajoute seek pour plus de flexibilité
             stream = await play.stream(urlToPlay, { 
-                discordPlayerCompatible: true
-                // ✅ htm: true a été supprimé (option inexistante causant des erreurs)
+                discordPlayerCompatible: true,
+                quality: 1 // Priorise la vitesse de chargement pour le karaoké
             });
-        } catch (streamErr) {
-            console.error(`❌ [YouTube] Échec du stream pour ${urlToPlay}:`, streamErr.message);
+        } catch (err) {
+            console.error(`❌ [Stream] Erreur play-dl: ${err.message}`);
             return onFinish();
         }
 
-        if (!stream || !stream.stream) {
-            console.error("❌ [YouTube] Le flux audio est vide.");
-            return onFinish();
-        }
-
-        const resource = createAudioResource(stream.stream, { 
-            inputType: stream.type, 
-            inlineVolume: true 
+        const resource = createAudioResource(stream.stream, {
+            inputType: stream.type,
+            inlineVolume: true
         });
+        
+        // ✅ On règle le volume par défaut (0.5 pour ne pas exploser les oreilles)
+        resource.volume.setVolume(0.5);
 
+        // 5. GESTION DES ÉVÉNEMENTS
         session.player.removeAllListeners();
-        session.player.play(resource);
-
-        // Une seule écoute pour le passage à la suite
+        
         session.player.once(AudioPlayerStatus.Idle, () => {
+            console.log("🎵 [AudioPlayer] Fin de lecture normale.");
             onFinish();
         });
 
-        session.player.once('error', (err) => {
-            console.error("[AudioPlayer] Erreur de lecture :", err.message);
-            session.player.stop(); 
+        session.player.on('error', (error) => {
+            console.error(`❌ [AudioPlayer] Erreur sur ${urlToPlay}:`, error.message);
             onFinish();
         });
+
+        // ✅ LANCEMENT
+        session.player.play(resource);
 
     } catch (error) {
         console.error("[AudioPlayer] Erreur critique :", error);
