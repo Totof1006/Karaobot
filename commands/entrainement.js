@@ -1,9 +1,3 @@
-Voici la version corrigée de ton fichier commands/entrainement.js.
-
-L'objectif ici est de sécuriser la capture du formulaire. Comme nous l'avons vu, utiliser interaction.awaitModalSubmit peut échouer si l'interaction est instable. Passer par interaction.client garantit que le bot écoute la réponse de manière globale et fiable.
-
-📄 Fichier : commands/entrainement.js corrigé
-JavaScript
 const { 
     SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
     EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, 
