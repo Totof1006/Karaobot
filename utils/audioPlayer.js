@@ -1,7 +1,10 @@
-const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType } = require('@discordjs/voice');
+const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
 const play = require('play-dl');
 const fs = require('fs');
 const path = require('path');
+
+// --- AJOUT : IMPORT DES UTILITAIRES DE SYNCHRO ---
+const { getLyrics, startLyricsStream } = require('./lyricsSync');
 
 const VOLUME_PATH = '/data/playlist_cache.json';
 
@@ -22,7 +25,6 @@ function saveToCache(songName, url) {
     try {
         ensureDirectory();
         const cache = getCachedPlaylist();
-        // Extraction robuste de l'ID
         const videoId = play.extractID(url); 
         if (videoId) {
             cache[songName.toLowerCase().trim()] = videoId;
@@ -37,15 +39,13 @@ async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
-        // 1. COOKIES (Nettoyage des caractères invisibles pour Railway)
+        // 1. COOKIES
         if (process.env.YT_COOKIES_BASE64) {
             try {
-                // ✅ Correction : On décode et on retire TOUS les sauts de ligne et espaces superflus
                 const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64')
                     .toString('utf-8')
-                    .replace(/[\n\r]/g, '') // Supprime les retours à la ligne
-                    .trim();                // Supprime les espaces en début/fin
-
+                    .replace(/[\n\r]/g, '')
+                    .trim(); 
                 await play.setToken({ youtube: { cookie: decoded } });
             } catch (e) { console.error("[Cookies] Erreur formatage :", e.message); }
         }
@@ -55,7 +55,6 @@ async function playAudio(session, input, onFinish) {
             session.player = createAudioPlayer({
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
             });
-            // ✅ SÉCURITÉ : On s'assure que la connexion est liée au player
             if (session.connection) session.connection.subscribe(session.player);
         }
 
@@ -97,20 +96,39 @@ async function playAudio(session, input, onFinish) {
             inputType: stream.type,
             inlineVolume: true
         });
-        
-        // Volume par défaut
         resource.volume.setVolume(0.5);
 
         // 5. GESTION DES ÉVÉNEMENTS
         session.player.removeAllListeners();
-        
+
+        // ✅ AJOUT : DÉCLENCHEMENT AU MOMENT DU "PLAYING" RÉEL
+        session.player.once(AudioPlayerStatus.Playing, () => {
+            console.log(`🎤 [Sync] Lecture réelle commencée pour : ${input}`);
+            
+            // On active le flag pour le calcul du score dans voiceReceiver
+            session.isRecording = true;
+
+            // Lancement des paroles synchronisées
+            const lyricsData = getLyrics(input);
+            if (lyricsData) {
+                // On stocke la fonction d'arrêt dans la session pour pouvoir la couper plus tard
+                session.stopLyrics = startLyricsStream(session.textChannel, lyricsData);
+            }
+        });
+
         session.player.once(AudioPlayerStatus.Idle, () => {
             console.log("🎵 [AudioPlayer] Fin de lecture.");
+            // ✅ Nettoyage des paroles et du score
+            if (session.stopLyrics) session.stopLyrics();
+            session.isRecording = false;
             onFinish();
         });
 
         session.player.on('error', (error) => {
             console.error(`❌ [AudioPlayer] Erreur sur ${urlToPlay}:`, error.message);
+            // ✅ Nettoyage en cas d'erreur
+            if (session.stopLyrics) session.stopLyrics();
+            session.isRecording = false;
             onFinish();
         });
 
