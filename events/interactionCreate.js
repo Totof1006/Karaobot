@@ -1,5 +1,5 @@
 const { EmbedBuilder, InteractionType, Events } = require('discord.js');
-const ytdl = require('@distube/ytdl-core');
+const play = require('play-dl');
 
 // --- IMPORTS DES UTILITAIRES ---
 const { getSession, addPlayer, addVote } = require('../utils/gameState'); 
@@ -18,17 +18,32 @@ const { checkAnnouncementButton, checkCommandChannel } = require('../utils/chann
 
 // --- FONCTIONS UTILITAIRES ---
 
-async function getAudioDuration(url) {
-    if (!url || !ytdl.validateURL(url)) return 0;
+/**
+ * Récupère la durée d'une vidéo YouTube via play-dl (plus fiable sur Railway)
+ */
+async function getAudioDuration(input) {
+    if (!input) return 0;
     try {
-        const info = await ytdl.getBasicInfo(url, {
-            requestOptions: {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                }
-            }
-        });
-        return parseInt(info.videoDetails.lengthSeconds) || 0;
+        // Configuration des cookies pour l'autorisation YouTube
+        if (process.env.YT_COOKIES_BASE64) {
+            const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64')
+                .toString('utf-8')
+                .replace(/[\n\r]/g, '')
+                .trim();
+            await play.setToken({ youtube: { cookie: decoded } });
+        }
+
+        let videoUrl = input.trim();
+
+        // Si ce n'est pas un lien, on cherche la vidéo d'abord
+        if (!videoUrl.startsWith('http')) {
+            const search = await play.search(videoUrl, { limit: 1 });
+            if (search.length === 0) return 0;
+            videoUrl = search[0].url;
+        }
+
+        const info = await play.video_info(videoUrl);
+        return info.video_details.durationInSec || 0;
     } catch (e) {
         console.error(`[AudioDuration Error] ${e.message}`);
         return 0;
@@ -102,19 +117,23 @@ module.exports = {
                 }
 
                 const songQuery = session.songs[songIndex];
+                
+                // Récupération de la durée réelle via play-dl
                 const youtubeDuration = await getAudioDuration(songQuery); 
-                const apiDuration = 180;
+                const apiDuration = 180; // Valeur de référence attendue par ton système
 
                 const diff = Math.abs(youtubeDuration - apiDuration);
-                const isMatch = diff <= 5;
+                const isMatch = youtubeDuration > 0 && diff <= 10; // Tolérance de 10s
+
+                const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`;
 
                 const embed = new EmbedBuilder()
                     .setTitle(`Vérification : ${songQuery}`)
                     .setColor(isMatch ? 0x00FF00 : 0xFF0000)
                     .addFields(
-                        { name: '⏱️ API', value: `${Math.floor(apiDuration/60)}:${(apiDuration%60).toString().padStart(2, '0')}`, inline: true },
-                        { name: '📺 Vidéo', value: `${Math.floor(youtubeDuration/60)}:${(youtubeDuration%60).toString().padStart(2, '0')}`, inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **Correspondance validée !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
+                        { name: '⏱️ Attendu', value: formatTime(apiDuration), inline: true },
+                        { name: '📺 Détecté', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : "Inconnu ❌", inline: true },
+                        { name: '📊 Verdict', value: isMatch ? '✅ **La durée correspond au test !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
                     );
 
                 return await interaction.editReply({ embeds: [embed] });
@@ -140,5 +159,5 @@ module.exports = {
         } catch (err) {
             console.error('[Global Button Error]', err);
         }
-    }, // Fin de execute
-}; // Fin de module.exports
+    },
+};
