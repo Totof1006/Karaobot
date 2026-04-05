@@ -15,23 +15,27 @@ module.exports = {
     async execute(interaction) {
         const guard = checkCommandChannel(interaction);
         if (!guard.ok) {
-            return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+            // ✅ CORRECTION : flags: 64 pour le garde-fou
+            return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 });
         }
 
         const guildId = interaction.guildId;
         const event = getEvent(guildId);
 
         if (!event) {
-            return interaction.reply({ embeds: [errorEmbed('Aucun événement planifié.')], ephemeral: true });
+            // ✅ CORRECTION : flags: 64 si aucun événement
+            return interaction.reply({ embeds: [errorEmbed('Aucun événement planifié.')], flags: 64 });
         }
 
         const reg = event.registrations.find(r => r.userId === interaction.user.id);
         if (!reg) {
-            return interaction.reply({ embeds: [errorEmbed('Utilise `/inscrire` d\'abord.')], ephemeral: true });
+            // ✅ CORRECTION : flags: 64 si pas inscrit
+            return interaction.reply({ embeds: [errorEmbed('Utilise `/inscrire` d\'abord.')], flags: 64 });
         }
 
         if (!isRegistrationOpen(event)) {
-            return interaction.reply({ embeds: [errorEmbed(`Fermé depuis le ${formatDate(event.registrationEnd)}`)], ephemeral: true });
+            // ✅ CORRECTION : flags: 64 si inscriptions fermées
+            return interaction.reply({ embeds: [errorEmbed(`Fermé depuis le ${formatDate(event.registrationEnd)}`)], flags: 64 });
         }
 
         const songs = [
@@ -43,9 +47,10 @@ module.exports = {
         setPlayerSongs(guildId, interaction.user.id, songs);
         await refreshAnnouncement(interaction, guildId);
 
+        // ✅ CORRECTION : flags: 64 pour la confirmation finale
         return interaction.reply({
             embeds: [successEmbed(`Chansons enregistrées pour **${event.title}** :\n${songs.map(s => `🎵 ${s.title}`).join('\n')}`)],
-            ephemeral: true,
+            flags: 64,
         });
     },
 };
