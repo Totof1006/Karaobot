@@ -1,14 +1,21 @@
 const prism = require('prism-media');
 
 /**
- * Analyse le flux audio pour détecter l'activité vocale (VAD réelle via PCM)
+ * Analyse le flux audio pour détecter l'activité vocale (VAD via PCM)
+ * @param {ReadableStream} receiverStream - Le flux Opus venant de Discord
+ * @param {Function} onActivity - Callback appelé quand une voix est détectée
  */
 function analyzeVoiceActivity(receiverStream, onActivity) {
     if (!receiverStream) return;
 
-    // --- TRANSFORMATION EN PCM S16LE (Audio Brut) ---
-    // On décompresse le flux Opus de Discord pour lire la vraie puissance du son
-    const opusDecoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
+    // --- TRANSFORMATION EN PCM S16LE (48kHz, 2 canaux) ---
+    // On décompresse le flux Opus pour lire la puissance réelle du signal
+    const opusDecoder = new prism.opus.Decoder({ 
+        frameSize: 960, 
+        channels: 2, 
+        rate: 48000 
+    });
+
     const pcmStream = receiverStream.pipe(opusDecoder);
 
     let packetCount = 0;
@@ -20,41 +27,53 @@ function analyzeVoiceActivity(receiverStream, onActivity) {
         let sum = 0;
         let sampleCount = 0;
 
-        // On parcourt le buffer par pas de 2 octets pour lire les valeurs 16-bit
-        for (let i = 0; i < chunk.length; i += 2) {
-            // Lecture de l'échantillon (Int16 Little Endian)
-            const sample = chunk.readInt16LE(i);
-            sum += Math.abs(sample);
-            sampleCount++;
+        // OPTIMISATION : On ne parcourt pas chaque échantillon (trop lourd pour le CPU)
+        // On saute un échantillon sur deux (pas de 4 octets au lieu de 2)
+        // La précision reste suffisante pour détecter le volume global.
+        for (let i = 0; i < chunk.length; i += 4) {
+            try {
+                const sample = chunk.readInt16LE(i);
+                sum += Math.abs(sample);
+                sampleCount++;
+            } catch (e) {
+                break; // Fin de buffer inattendue
+            }
         }
         
-        // Volume moyen (RMS simplifié)
-        const rms = sum / sampleCount;
+        // Calcul du volume moyen (RMS simplifié)
+        const rms = sampleCount > 0 ? sum / sampleCount : 0;
 
-        // --- SEUIL DE DÉTECTION PCM ---
-        // 0 = Silence absolu | 32767 = Maximum possible
-        // Un souffle/bruit ambiant est < 300.
-        // Une voix normale se situe entre 800 et 3000.
+        // --- SEUIL DE DÉTECTION ---
+        // 0 = Silence | 32767 = Max
+        // Seuil à 850 : Filtre le souffle et les bruits de clavier.
+        // Une voix chantée monte facilement à 1500-3000.
         if (rms > 850) { 
             onActivity(rms);
         }
         
-        // Log de debug tous les 500 paquets (environ toutes les 10 secondes)
+        // Log de santé toutes les ~10 secondes de chant
         packetCount++;
         if (packetCount % 500 === 0) {
-            console.log(`[Analyzer] Analyseur PCM actif - Volume : ${Math.round(rms)}`);
+            console.log(`[Analyzer] PCM OK - Volume moyen actuel : ${Math.round(rms)}`);
         }
     });
 
+    // --- GESTION DES ERREURS ET NETTOYAGE ---
     pcmStream.on('error', (err) => {
         if (err.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
         console.error("[Analyzer] Erreur décodage PCM :", err.message);
     });
 
-    // Nettoyage des ressources quand le flux s'arrête
+    // Crucial pour éviter les fuites de mémoire sur Railway
     receiverStream.on('end', () => {
-        opusDecoder.destroy();
-        console.log("[Analyzer] Décodeur libéré.");
+        if (!opusDecoder.destroyed) {
+            opusDecoder.destroy();
+            console.log("[Analyzer] Décodeur Opus libéré proprement.");
+        }
+    });
+
+    receiverStream.on('close', () => {
+        if (!opusDecoder.destroyed) opusDecoder.destroy();
     });
 }
 
