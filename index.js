@@ -4,16 +4,33 @@ const path = require('path');
 require('dotenv').config();
 
 // --- SYNCHRONISATION DES COOKIES YOUTUBE ---
-if (process.env.YT_COOKIES_BASE64) {
+// On vérifie les deux noms possibles pour être sûr
+const rawCookies = process.env.YT_COOKIES_BASE64 || process.env.YOUTUBE_COOKIES;
+
+if (rawCookies) {
     try {
-        const cookieContent = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
-        // Vérification du dossier /data pour Railway (Volume persistant)
-        if (!fs.existsSync('/data')) fs.mkdirSync('/data'); 
-        fs.writeFileSync('/data/youtube_cookies.txt', cookieContent);
-        console.log("✅ Fichier youtube_cookies.txt généré dans le volume.");
+        let cookieContent;
+        
+        // Si c'est du Base64 (on vérifie s'il y a des caractères typiques ou si c'est YT_COOKIES_BASE64)
+        if (process.env.YT_COOKIES_BASE64) {
+            cookieContent = Buffer.from(rawCookies, 'base64').toString('utf-8');
+        } else {
+            cookieContent = rawCookies; // Texte brut
+        }
+
+        // Définition du chemin (Volume Railway /data ou local /app/data)
+        const dataDir = path.join(__dirname, 'data');
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        
+        const cookiePath = path.join(dataDir, 'youtube_cookies.txt');
+        fs.writeFileSync(cookiePath, cookieContent);
+        
+        console.log(`✅ Fichier youtube_cookies.txt généré avec succès dans : ${cookiePath}`);
     } catch (err) {
         console.error("❌ Erreur lors de la génération des cookies :", err.message);
     }
+} else {
+    console.warn("⚠️ Aucune variable de cookies (YT_COOKIES_BASE64 ou YOUTUBE_COOKIES) trouvée.");
 }
 
 // ─── 1. CONTRÔLE ANTI-CRASH ──────────────────────────────────────────
@@ -27,12 +44,12 @@ process.on('uncaughtException', (err) => {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,        // ✅ Requis pour vérifier les rôles (Leader, Modo, etc.)
+        GatewayIntentBits.GuildMembers,        
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,      // ✅ Requis si tu lis des liens dans le chat
-        GatewayIntentBits.GuildVoiceStates,    // ✅ CRUCIAL pour le Karaoké (Mute/Unmute/Déconnexion)
-        GatewayIntentBits.GuildScheduledEvents, // ✅ Requis pour la gestion des événements Discord
-        GatewayIntentBits.GuildPresences,      // 💡 Optionnel mais recommandé pour la stabilité des membres
+        GatewayIntentBits.MessageContent,      
+        GatewayIntentBits.GuildVoiceStates,    
+        GatewayIntentBits.GuildScheduledEvents, 
+        GatewayIntentBits.GuildPresences,      
     ],
 });
 
@@ -61,13 +78,15 @@ if (fs.existsSync(eventsPath)) {
     for (const file of eventFiles) {
         try {
             const event = require(path.join(eventsPath, file));
-            // ✅ Utilisation du nom défini dans le fichier ou le nom de l'énumération
+            // Correction de la récupération du nom pour éviter l'erreur "Events is not defined"
             const eventName = event.name; 
             
-            if (event.once) {
-                client.once(eventName, (...args) => event.execute(...args, client));
-            } else {
-                client.on(eventName, (...args) => event.execute(...args, client));
+            if (eventName) {
+                if (event.once) {
+                    client.once(eventName, (...args) => event.execute(...args, client));
+                } else {
+                    client.on(eventName, (...args) => event.execute(...args, client));
+                }
             }
         } catch (error) {
             console.error(`⚠️ Erreur sur l'événement ${file}:`, error.message);
