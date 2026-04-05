@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { lockChannel, ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
-const { saveVoiceChannel }                 = require('../utils/persist');
-const { errorEmbed, successEmbed }         = require('../utils/embeds');
+const { saveVoiceChannel }                   = require('../utils/persist');
+const { errorEmbed, successEmbed }           = require('../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -21,7 +21,7 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent verrouiller le salon.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -38,6 +38,7 @@ module.exports = {
         ));
       }
     }
+    
     if (kickOps.length > 0) await Promise.all(kickOps);
     const kicked = kickOps.length;
 
@@ -49,6 +50,7 @@ module.exports = {
       ? `\n• 👢 **${kicked} membre(s) déconnecté(s)** (Chanteurs/Spectateurs)`
       : '\n• ✅ Aucun membre à déconnecter';
 
+    // ✅ CORRECTION : flags: 64 pour que le rapport de verrouillage soit privé
     return interaction.reply({
       embeds: [successEmbed(
         `🔒 Salon **${channel.name}** verrouillé !\n\n` +
@@ -57,6 +59,7 @@ module.exports = {
         kickedLine + `\n\n` +
         `_⚠️ Si des membres n'ont pas été déconnectés, vérifiez que le bot a la permission **Déplacer des membres**._`
       )],
+      flags: 64,
     });
   },
 };
