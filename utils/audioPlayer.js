@@ -1,6 +1,3 @@
-Voici le dernier fichier, audioPlayer.js, corrigé avec les sécurités nécessaires pour éviter l'erreur Invalid URL et garantir que tes cookies sont utilisés correctement.
-
-JavaScript
 const { createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior } = require('@discordjs/voice');
 const play = require('play-dl');
 const fs = require('fs');
