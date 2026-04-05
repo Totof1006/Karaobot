@@ -53,6 +53,7 @@ for (const file of commandFiles) {
 }
 
 // ─── 3. CHARGEMENT DES ÉVÉNEMENTS ───────────────────────────────────────────
+// ✅ C'est ce bloc qui charge ton fichier events/interactionCreate.js
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) {
     const eventFiles = fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'));
@@ -71,42 +72,10 @@ if (fs.existsSync(eventsPath)) {
     }
 }
 
-// ─── 4. GESTION DES INTERACTIONS (MODALS & BOUTONS) ─────────────────────────
-// On importe le fichier inscrire pour utiliser ses fonctions de traitement
-const inscrire = require('./commands/inscrire'); 
+// ─── 4. CONNEXION ───────────────────────────────────────────────────────────
+// ✅ Note : Le bloc client.on(Events.InteractionCreate) a été supprimé ici
+// car il faisait doublon avec le dossier /events et causait l'erreur 10062.
 
-client.on(Events.InteractionCreate, async interaction => {
-    try {
-        // Traitement des Commandes Slash
-        if (interaction.isChatInputCommand()) {
-            const command = client.commands.get(interaction.commandName);
-            if (!command) return;
-            await command.execute(interaction);
-        }
-
-        // Traitement des Soumissions de Formulaires (Modals)
-        if (interaction.isModalSubmit()) {
-            if (interaction.customId === 'modal_register_songs') {
-                await inscrire.handleModalSubmit(interaction);
-            }
-        }
-
-        // Traitement des Boutons
-        if (interaction.isButton()) {
-            // Bouton "S'inscrire" sur l'annonce de l'événement
-            if (interaction.customId === 'btn_register') {
-                await inscrire.showRegistrationModal(interaction);
-            }
-        }
-    } catch (error) {
-        console.error('❌ Erreur interaction:', error);
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Une erreur est survenue lors de cette interaction.', ephemeral: true }).catch(() => null);
-        }
-    }
-});
-
-// ─── 5. CONNEXION ───────────────────────────────────────────────────────────
 client.login(process.env.DISCORD_TOKEN).catch(err => {
     console.error('❌ [LOGIN ERROR]:', err.message);
 });
