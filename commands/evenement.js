@@ -35,16 +35,15 @@ module.exports = {
       .setRequired(false)),
 
   async execute(interaction) {
-    // --- CORRECTION : On déclenche le deferReply immédiatement ---
-    // Cela donne 15 minutes au bot pour faire tous les calculs suivants sans expirer.
-    await interaction.deferReply({ ephemeral: true });
+    // ✅ CORRECTION : Utilisation de flags: 64 pour la réponse différée initiale
+    await interaction.deferReply({ flags: 64 });
 
     const guildId = interaction.guildId;
 
     if (getEvent(guildId)) {
-      return interaction.editReply({ // Changé reply en editReply car on a defer
-        embeds: [errorEmbed('Un événement existe déjà ! Utilisez `/annuler-evenement` avant d\'en créer un nouveau.')],
-        ephemeral: true,
+      // ✅ CORRECTION : editReply n'a plus besoin de flags/ephemeral (hérité du defer)
+      return interaction.editReply({ 
+        embeds: [errorEmbed('Un événement existe déjà ! Utilisez `/annuler-evenement` avant d\'en créer un nouveau.')]
       });
     }
 
@@ -59,23 +58,20 @@ module.exports = {
     const registrationEnd   = parseFrDate(rawClose);
 
     if (!eventDate || !registrationStart || !registrationEnd) {
-      return interaction.editReply({ // Changé en editReply
-        embeds: [errorEmbed('Format de date invalide. Utilise **JJ/MM/AAAA HH:MM** (ex: `28/03/2025 20:30`)')],
-        ephemeral: true,
+      return interaction.editReply({ 
+        embeds: [errorEmbed('Format de date invalide. Utilise **JJ/MM/AAAA HH:MM** (ex: `28/03/2025 20:30`)')]
       });
     }
 
     if (registrationStart >= registrationEnd) {
-      return interaction.editReply({ // Changé en editReply
-        embeds: [errorEmbed('La date d\'ouverture doit être avant la date de fermeture.')],
-        ephemeral: true,
+      return interaction.editReply({ 
+        embeds: [errorEmbed('La date d\'ouverture doit être avant la date de fermeture.')]
       });
     }
 
     if (registrationEnd >= eventDate) {
-      return interaction.editReply({ // Changé en editReply
-        embeds: [errorEmbed('La fermeture des inscriptions doit être avant la date de la session.')],
-        ephemeral: true,
+      return interaction.editReply({ 
+        embeds: [errorEmbed('La fermeture des inscriptions doit être avant la date de la session.')]
       });
     }
 
@@ -126,9 +122,8 @@ module.exports = {
     const savedVoiceChId = loadVoiceChannel(guildId);
 
     if (!savedVoiceChId) {
-        return interaction.editReply({ // Changé en editReply
-            embeds: [errorEmbed("❌ Aucun salon vocal n'est configuré. Utilisez d'abord la commande de configuration du salon vocal.")],
-            ephemeral: true
+        return interaction.editReply({ 
+            embeds: [errorEmbed("❌ Aucun salon vocal n'est configuré. Utilisez d'abord la configuration du salon vocal.")]
         });
     }
 
