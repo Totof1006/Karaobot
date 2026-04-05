@@ -6,7 +6,6 @@ const {
 const { joinVoiceChannel, entersState, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
 
 // Importation sécurisée de ton utilitaire
-// Assure-toi que le chemin est correct selon ton arborescence
 const voiceReceiver = require('../utils/voiceReceiver');
 
 module.exports = {
@@ -19,28 +18,25 @@ module.exports = {
         const guild = interaction.guild;
         const channelName = 'Entraînement 1';
         
-        // Recherche du salon
+        // Recherche du salon (Type 2 = GuildVoice)
         const channel = guild.channels.cache.find(c => 
             c.name === channelName && (c.type === ChannelType.GuildVoice || c.type === 2)
         );
 
         if (!channel) {
             return interaction.reply({ 
-                content: `⚠️ Salon vocal "${channelName}" introuvable. Vérifiez le nom du salon.`, 
+                content: `⚠️ Salon vocal "${channelName}" introuvable. Vérifiez le nom exact du salon.`, 
                 flags: 64 
             });
         }
 
         // Vérification d'occupation (Exclure les bots)
         const humanMembers = channel.members.filter(m => !m.user.bot);
-        if (humanMembers.size > 0) {
-            // Si le salon est occupé par quelqu'un d'autre que l'utilisateur lui-même
-            if (!humanMembers.has(interaction.user.id)) {
-                return interaction.reply({ 
-                    content: "⚠️ Le salon est déjà occupé par un autre chanteur.", 
-                    flags: 64 
-                });
-            }
+        if (humanMembers.size > 0 && !humanMembers.has(interaction.user.id)) {
+            return interaction.reply({ 
+                content: "⚠️ Le salon est déjà occupé par un autre chanteur.", 
+                flags: 64 
+            });
         }
 
         // --- PRÉPARATION DU MODAL ---
@@ -80,20 +76,21 @@ module.exports = {
 
         // --- COLLECTEUR DE RÉPONSE ---
         try {
+            // ✅ CORRECTION : On utilise directement interaction.awaitModalSubmit
             const submitted = await interaction.awaitModalSubmit({ 
                 time: 60000, 
                 filter: i => i.customId === `modal_train_${interaction.user.id}` 
             });
 
-            // Une fois reçu, on diffère immédiatement pour avoir du temps (Railway peut être lent)
+            // Une fois reçu, on diffère immédiatement (Flag 64 pour rester privé)
             await submitted.deferReply({ flags: 64 });
 
-            // Extraction des musiques
-            const s1 = submitted.fields.getTextInputValue('s1');
-            const s2 = submitted.fields.getTextInputValue('s2');
-            const s3 = submitted.fields.getTextInputValue('s3');
-
-            const songs = [s1, s2, s3].filter(s => s && s.trim().length > 1);
+            // Extraction et nettoyage des musiques
+            const songs = [
+                submitted.fields.getTextInputValue('s1'),
+                submitted.fields.getTextInputValue('s2'),
+                submitted.fields.getTextInputValue('s3')
+            ].filter(s => s && s.trim().length > 1);
 
             // Initialisation de la session globale
             if (!global.trainingSessions) global.trainingSessions = new Map();
@@ -120,11 +117,11 @@ module.exports = {
                 });
             }
 
-            // Attente de l'état prêt
+            // Attente de l'état prêt (Timeout 10s)
             await entersState(connection, VoiceConnectionStatus.Ready, 10000);
             session.connection = connection;
 
-            // Setup du Receiver (si la fonction existe)
+            // Setup du Receiver
             if (voiceReceiver && voiceReceiver.setupUserReceiver) {
                 voiceReceiver.setupUserReceiver(session, interaction.user.id);
             }
@@ -142,28 +139,34 @@ module.exports = {
                 .setDescription(`Tes musiques sont prêtes, <@${interaction.user.id}>.\n\n**Salon :** <#${channel.id}>\n\n**Liste :**\n${songs.map((s, i) => `**${i+1}.** ${s}`).join('\n')}`)
                 .setFooter({ text: "Utilise les boutons ci-dessous pour gérer ton entraînement." });
 
-            // Envoi d'un message de contrôle dans le salon vocal
+            // Message public/vocal pour le contexte
             await channel.send({ 
                 content: `🔔 Session de <@${interaction.user.id}> prête.`, 
                 embeds: [embed], 
                 components: [buttons] 
             });
 
-            // Confirmation privée
+            // Confirmation privée à l'utilisateur
             await submitted.editReply({ 
                 content: `✅ Tout est prêt ! Rejoins <#${channel.id}> pour commencer.` 
             });
 
         } catch (err) {
-            // Si l'utilisateur a ignoré le modal ou s'il y a une erreur technique
+            // Gestion de l'expiration (60s sans réponse)
             if (err.code === 'INTERACTION_COLLECTOR_ERROR') {
-                return; // Temps écoulé, pas besoin de log
+                return; 
             }
+            
             console.error("❌ Erreur Entraînement:", err);
-            // On essaie de répondre si l'interaction est encore valide
+            
+            // Tentative de réponse en cas d'erreur technique
             try {
-                await interaction.followUp({ content: "⚠️ Une erreur est survenue (Temps écoulé ou problème de connexion).", flags: 64 });
-            } catch (e) {}
+                if (!interaction.replied) {
+                    await interaction.followUp({ content: "⚠️ Une erreur est survenue lors de la configuration.", flags: 64 });
+                }
+            } catch (e) {
+                // L'interaction peut déjà être expirée ici
+            }
         }
     }
 };
