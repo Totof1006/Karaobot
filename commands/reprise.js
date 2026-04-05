@@ -20,18 +20,18 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent reprendre la session.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
     const session = getSession(interaction.guildId);
 
     if (!session) {
-      return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], ephemeral: true });
+      return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], flags: 64 }); // ✅ CORRECTION
     }
 
     if (!session.paused) {
-      return interaction.reply({ embeds: [errorEmbed('La session n\'est pas en pause.')], ephemeral: true });
+      return interaction.reply({ embeds: [errorEmbed('La session n\'est pas en pause.')], flags: 64 }); // ✅ CORRECTION
     }
 
     if (session.phase !== 'paused') {
@@ -40,7 +40,7 @@ module.exports = {
           'La pause n\'est pas encore active — le vote est peut-être encore en cours.\n' +
           'Attends la fin du vote puis réessaie.'
         )],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -48,7 +48,7 @@ module.exports = {
     session.paused = false;
     session.phase  = 'singing';
 
-    // Acquitter l'interaction en premier
+    // ✅ NOTE : Public pour prévenir tout le monde que le karaoké reprend
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
@@ -59,12 +59,11 @@ module.exports = {
     });
 
     // Passer un contexte channel/guild plutôt que l'interaction déjà acquittée
-    // pour éviter un double-reply dans startBreakThenSing
     const fakeCtx = {
       guild    : interaction.guild,
       channel  : interaction.channel,
       guildId  : interaction.guildId,
-      update   : null,        // désactive interaction.update dans startBreakThenSing
+      update   : null,
       deferUpdate: null,
     };
     await startBreakThenSing(fakeCtx, session, false);
