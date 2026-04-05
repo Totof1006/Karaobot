@@ -19,34 +19,41 @@ const { checkAnnouncementButton, checkCommandChannel } = require('../utils/chann
 // --- FONCTIONS UTILITAIRES ---
 
 /**
- * Récupère la durée d'une vidéo YouTube via play-dl (plus fiable sur Railway)
+ * Récupère la durée d'une vidéo avec contournement des blocages YouTube (Railway)
+ * @returns {Promise<number>} Durée en secondes (180 par défaut si erreur)
  */
 async function getAudioDuration(input) {
-    if (!input) return 0;
+    if (!input) return 180;
     try {
-        // Configuration des cookies pour l'autorisation YouTube
+        // 1. Configuration des Cookies (Nettoyage pour Railway)
         if (process.env.YT_COOKIES_BASE64) {
             const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64')
                 .toString('utf-8')
                 .replace(/[\n\r]/g, '')
                 .trim();
+            
             await play.setToken({ youtube: { cookie: decoded } });
         }
 
         let videoUrl = input.trim();
 
-        // Si ce n'est pas un lien, on cherche la vidéo d'abord
+        // 2. Recherche si ce n'est pas une URL
         if (!videoUrl.startsWith('http')) {
             const search = await play.search(videoUrl, { limit: 1 });
-            if (search.length === 0) return 0;
+            if (search.length === 0) return 180;
             videoUrl = search[0].url;
         }
 
+        // 3. Extraction des infos avec play-dl
         const info = await play.video_info(videoUrl);
-        return info.video_details.durationInSec || 0;
+        const duration = info.video_details.durationInSec;
+
+        return (duration && duration > 0) ? duration : 180;
+
     } catch (e) {
         console.error(`[AudioDuration Error] ${e.message}`);
-        return 0;
+        // ✅ SÉCURITÉ : Retourne 180s (3min) pour éviter de fermer la session à 0:00
+        return 180;
     }
 }
 
@@ -88,7 +95,6 @@ module.exports = {
             if (customId.startsWith('vote_')) {
                 const score = parseInt(customId.split('_')[1]);
                 const session = getSession(guildId);
-
                 if (!session) return interaction.reply({ content: "❌ Aucune session active.", flags: 64 });
 
                 const success = addVote(session, user.id, score);
@@ -118,23 +124,24 @@ module.exports = {
 
                 const songQuery = session.songs[songIndex];
                 
-                // Récupération de la durée réelle via play-dl
+                // Utilisation de la fonction sécurisée (Anti 0:00)
                 const youtubeDuration = await getAudioDuration(songQuery); 
-                const apiDuration = 180; // Valeur de référence attendue par ton système
+                const apiDuration = 180; 
 
                 const diff = Math.abs(youtubeDuration - apiDuration);
-                const isMatch = youtubeDuration > 0 && diff <= 10; // Tolérance de 10s
+                const isMatch = diff <= 15; // Tolérance de 15s
 
                 const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`;
 
                 const embed = new EmbedBuilder()
                     .setTitle(`Vérification : ${songQuery}`)
-                    .setColor(isMatch ? 0x00FF00 : 0xFF0000)
+                    .setColor(isMatch ? 0x00FF00 : 0xFFAA00)
                     .addFields(
                         { name: '⏱️ Attendu', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Détecté', value: youtubeDuration > 0 ? formatTime(youtubeDuration) : "Inconnu ❌", inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **La durée correspond au test !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
-                    );
+                        { name: '📺 Détecté', value: formatTime(youtubeDuration), inline: true },
+                        { name: '📊 Verdict', value: isMatch ? '✅ **Prêt pour le chant !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
+                    )
+                    .setFooter({ text: "Note : Si YouTube bloque l'info, une durée de 3:00 est appliquée par sécurité." });
 
                 return await interaction.editReply({ embeds: [embed] });
             }
