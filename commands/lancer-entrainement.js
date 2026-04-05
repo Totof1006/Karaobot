@@ -7,15 +7,19 @@ module.exports = {
         .setDescription('▶️ Lance la séquence d\'entraînement'),
 
     async execute(interaction) {
+        // --- CORRECTION : On informe Discord que le traitement va prendre du temps ---
+        // Cela donne 15 minutes au bot pour répondre au lieu de 3 secondes.
+        await interaction.deferReply({ ephemeral: true });
+
         const session = global.trainingSessions?.get(interaction.user.id);
         
         // Vérification de la connexion et de l'état
         if (!session || !session.connection) {
-            return interaction.reply({ content: "❌ Session introuvable. Fais `/entrainement`.", ephemeral: true });
+            return interaction.editReply({ content: "❌ Session introuvable. Fais `/entrainement`." });
         }
 
-        // On informe l'utilisateur que le test commence
-        await interaction.reply({ content: "🎤 Analyse des titres et lancement du test...", ephemeral: true });
+        // On informe l'utilisateur via editReply (puisqu'on a fait un deferReply)
+        await interaction.editReply({ content: "🎤 Analyse des titres et lancement du test..." });
 
         for (let i = 0; i < session.songs.length; i++) {
             // Sécurité : Si l'utilisateur a supprimé la session entre deux musiques
@@ -32,7 +36,7 @@ module.exports = {
 
             await interaction.channel.send({ embeds: [startEmbed] });
 
-            // On utilise la fonction playAudio (qui gère déjà play-dl en interne)
+            // On utilise la fonction playAudio (qui gère déjà play-dl et le volume de cache)
             // On attend la fin de la musique (resolve) avant de passer à la suivante
             await new Promise(resolve => {
                 playAudio(session, trackText, () => {
@@ -41,7 +45,6 @@ module.exports = {
             });
 
             // --- CALCUL DU SCORE ---
-            // On ajuste le diviseur (350) selon tes tests de précision
             const score = Math.min(Math.round((session.precisionTicks / 350) * 100), 100);
             
             const resultEmbed = new EmbedBuilder()
@@ -52,12 +55,15 @@ module.exports = {
 
             await interaction.channel.send({ embeds: [resultEmbed] });
 
-            // Petite pause de 2 secondes entre les musiques pour laisser respirer le flux audio
+            // Petite pause de 2 secondes entre les musiques
             if (i < session.songs.length - 1) {
                 await new Promise(r => setTimeout(r, 2000));
             }
         }
 
         await interaction.channel.send("🎉 **Session d'entraînement terminée !** Tu peux relancer avec `/entrainement`.");
+        
+        // On finalise l'interaction de l'utilisateur
+        await interaction.editReply({ content: "✅ Test terminé avec succès." });
     }
 };
