@@ -16,27 +16,27 @@ module.exports = {
     if (!stats) {
       return interaction.reply({
         embeds: [errorEmbed(`<@${target.id}> n'a pas encore joué sur ce serveur !`)],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
+    const avg = stats.gamesPlayed > 0 ? Math.round(stats.totalScore / stats.gamesPlayed) : 0;
+
     const embed = new EmbedBuilder()
       .setColor(0x9B59B6)
-      .setTitle(`🎤 Stats de ${stats.username}`)
-      .setThumbnail(target.displayAvatarURL())
+      .setTitle(`📊 Stats de ${target.username}`)
+      .setThumbnail(target.displayAvatarURL({ dynamic: true }))
       .addFields(
-        { name: '🎮 Parties jouées', value: `${stats.gamesPlayed}`, inline: true },
-        { name: '🏆 Victoires', value: `${stats.wins}`, inline: true },
-        { name: '📊 Score total', value: `${stats.totalScore} pts`, inline: true },
-        { name: '⭐ Meilleur score', value: `${stats.bestScore} pts`, inline: true },
-        {
-          name: '📈 Moyenne par partie',
-          value: stats.gamesPlayed > 0 ? `${Math.round(stats.totalScore / stats.gamesPlayed)} pts` : 'N/A',
-          inline: true,
-        },
+        { name: '🎤 Sessions', value: `**${stats.gamesPlayed}**`, inline: true },
+        { name: '🏆 Victoires', value: `**${stats.wins}**`, inline: true },
+        { name: '🔥 Score Total', value: `**${stats.totalScore}** pts`, inline: true },
+        { name: '⭐ Record', value: `**${stats.bestScore}** pts`, inline: true },
+        { name: '📈 Moyenne', value: `**${avg}** pts/session`, inline: true }
       )
+      .setFooter({ text: 'Karaobot • Statistiques individuelles' })
       .setTimestamp();
 
+    // ✅ NOTE : Public pour permettre aux joueurs de comparer leurs stats dans le chat
     return interaction.reply({ embeds: [embed] });
   },
 };
