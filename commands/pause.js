@@ -16,7 +16,7 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent mettre en pause.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -25,21 +25,21 @@ module.exports = {
     if (!session) {
       return interaction.reply({
         embeds: [errorEmbed('Aucune session en cours.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
     if (session.paused) {
       return interaction.reply({
         embeds: [errorEmbed('La session est déjà en pause ! Utilise `/reprise` pour continuer.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
     if (session.phase === 'registration') {
       return interaction.reply({
         embeds: [errorEmbed('La session n\'a pas encore démarré.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -53,6 +53,7 @@ module.exports = {
       ? 'La pause sera effective **après le prochain vote**.'
       : 'La pause sera effective au **prochain passage**.\n_Clique sur [⏭️ Chanteur suivant] pour l\'activer._';
 
+    // ✅ NOTE : On laisse en public pour informer tout le salon de la pause à venir
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
