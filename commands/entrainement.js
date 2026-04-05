@@ -22,13 +22,14 @@ module.exports = {
         );
 
         if (!channel) {
-            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, ephemeral: true });
+            // CORRECTION : Utilisation de flags: 64 pour remplacer ephemeral: true
+            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: [64] });
         }
 
         // Vérification d'occupation
         const humanMembers = channel.members.filter(m => !m.user.bot);
         if (humanMembers.size > 0 && (!global.trainingSessions || !global.trainingSessions.has(interaction.user.id))) {
-            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", ephemeral: true });
+            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: [64] });
         }
 
         // --- PRÉPARATION DU MODAL ---
@@ -73,12 +74,14 @@ module.exports = {
             filter: i => i.customId === `modal_train_${interaction.user.id}` 
         }).catch(() => null);
 
+        // Si l'utilisateur ferme le modal ou attend trop longtemps, on arrête là.
         if (!submitted) return;
 
         // --- MAINTENANT ON DIT À DISCORD DE PATIENTER ---
         // Une fois le modal soumis, on a à nouveau 3 secondes. 
         // Le deferReply ici donne 15 minutes pour la suite (connexion vocale).
-        await submitted.deferReply({ ephemeral: true });
+        // CORRECTION : Utilisation de flags: 64
+        await submitted.deferReply({ flags: [64] });
 
         // Récupération des textes
         const songs = [
