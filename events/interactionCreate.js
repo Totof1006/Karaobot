@@ -1,4 +1,7 @@
-// ... (tes imports et fonctions formatTime / getAudioDuration)
+const { Events, InteractionType } = require('discord.js');
+const { errorEmbed } = require('../utils/embeds');
+
+// ... (tes fonctions formatTime / getAudioDuration si elles sont définies ici)
 
 module.exports = {
     name: Events.InteractionCreate,
