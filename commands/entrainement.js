@@ -12,6 +12,12 @@ module.exports = {
         .setDescription('🎤 Prépare ta session (Recherche automatique)'),
 
     async execute(interaction) {
+        // Cette ligne donne 15 minutes au bot pour répondre au lieu de 3 secondes
+        await interaction.deferReply({ ephemeral: true }); 
+    
+        // ... reste de ton code ...
+    
+    async execute(interaction) {
         // --- CORRECTION 1 : On prévient Discord qu'on traite la demande immédiatement ---
         // Note: On ne peut pas faire de deferReply SI on veut afficher un Modal. 
         // L'erreur "Unknown Interaction" vient souvent du délai de réponse AVANT showModal.
