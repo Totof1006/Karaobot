@@ -21,14 +21,16 @@ module.exports = {
     const session = getSession(interaction.guildId);
 
     if (!session) {
-      return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], ephemeral: true });
+      // ✅ CORRECTION
+      return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], flags: 64 });
     }
 
     const sub = interaction.options.getSubcommand();
 
     // ── VOIR ──────────────────────────────────────────────────────────────────
     if (sub === 'voir') {
-      return interaction.reply({ embeds: [buildOrderEmbed(session)], ephemeral: false });
+      // ✅ NOTE : On laisse en public pour que tout le salon puisse voir l'ordre
+      return interaction.reply({ embeds: [buildOrderEmbed(session)] });
     }
 
     // ── CHANGER (Leader ou Modo seulement) ────────────────────────────────────
@@ -39,21 +41,21 @@ module.exports = {
       if (!isLeader && !isModo) {
         return interaction.reply({
           embeds: [errorEmbed('Seuls les **Leader** et **Modo** peuvent modifier l\'ordre de passage.')],
-          ephemeral: true,
+          flags: 64, // ✅ CORRECTION
         });
       }
 
       if (session.phase !== 'registration' && session.phase !== 'singing') {
         return interaction.reply({
-          embeds: [errorEmbed('L\'ordre ne peut être modifié qu\'avant ou pendant la session (avant que le premier tour commence).')],
-          ephemeral: true,
+          embeds: [errorEmbed('L\'ordre ne peut être modifié qu\'avant ou pendant la session.')],
+          flags: 64, // ✅ CORRECTION
         });
       }
 
       if (session.currentSingerIndex > 0) {
         return interaction.reply({
           embeds: [errorEmbed('La session a déjà commencé, impossible de modifier l\'ordre.')],
-          ephemeral: true,
+          flags: 64, // ✅ CORRECTION
         });
       }
 
@@ -64,12 +66,12 @@ module.exports = {
       if (pos1 >= max || pos2 >= max) {
         return interaction.reply({
           embeds: [errorEmbed(`Positions invalides. Il y a **${max}** chanteurs (1 à ${max}).`)],
-          ephemeral: true,
+          flags: 64, // ✅ CORRECTION
         });
       }
 
       if (pos1 === pos2) {
-        return interaction.reply({ embeds: [errorEmbed('Les deux positions sont identiques.')], ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Les deux positions sont identiques.')], flags: 64 }); // ✅ CORRECTION
       }
 
       // Échanger
@@ -77,6 +79,7 @@ module.exports = {
       session.players[pos1] = session.players[pos2];
       session.players[pos2] = tmp;
 
+      // ✅ CORRECTION : La confirmation de modification est privée (flags: 64)
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
@@ -87,6 +90,7 @@ module.exports = {
               buildOrderList(session)
             ),
         ],
+        flags: 64,
       });
     }
   },
@@ -106,5 +110,4 @@ function buildOrderList(session) {
     const icon   = i < session.currentSingerIndex ? '✅' : icons[i] || `${i+1}.`;
     const status = i === session.currentSingerIndex ? ' ← **en cours**' : '';
     return `${icon} <@${p.userId}>${status}`;
-  }).join('\n');
-}
+  }).
