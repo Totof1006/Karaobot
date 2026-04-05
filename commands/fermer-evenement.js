@@ -6,12 +6,12 @@ const { cleanupAllKaraokeRoles,
 const { findVoiceChannel,
         unmuteAll,
         resetVoiceChannelPermissions }         = require('../utils/voiceManager');
-const { deleteSongFiles }                      = require('../utils/autoLyrics');
+const { deleteSongFiles }                       = require('../utils/autoLyrics');
 const { clearLastSession,
         clearNightResults,
         resetRematchCount }                    = require('../utils/persist');
 const { deleteSession, getSession }            = require('../utils/gameState');
-const { errorEmbed }                           = require('../utils/embeds');
+const { errorEmbed }                            = require('../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,13 +29,13 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent fermer un événement.')],
-        flags: 64, // ✅ CORRECTION
+        flags: 64,
       });
     }
 
     const event = getEvent(guildId);
 
-    // ✅ CORRECTION : Defer privé car le rapport de nettoyage est technique
+    // ✅ Defer privé pour le rapport de nettoyage
     await interaction.deferReply({ flags: 64 });
 
     const steps = [];
@@ -99,6 +99,25 @@ module.exports = {
       steps.push('⚠️ Erreur lors du verrouillage du salon vocal');
     }
 
-    // ── 5. Supprimer les fichiers .lrc des chansons de la soirée ─────────────
-    if (event?.registrations?.length > 0) {
-      const allSongs = event.registrations.flatMap(r => r.songs);
+    // ── 5. Supprimer les fichiers et nettoyer la base de données ─────────────
+    try {
+      deleteSongFiles(); // Nettoyage des fichiers paroles
+      deleteEvent(guildId); // Supprime l'événement de la DB
+      clearLastSession(guildId);
+      clearNightResults(guildId);
+      resetRematchCount(guildId);
+      steps.push('🧹 Base de données et fichiers temporaires nettoyés');
+    } catch (e) {
+      console.warn('[Fermeture] Erreur nettoyage DB :', e.message);
+    }
+
+    // ── 6. Rapport final ─────────────────────────────────────────────────────
+    const finalEmbed = new EmbedBuilder()
+      .setTitle('✅ Événement fermé avec succès')
+      .setColor('#2ecc71')
+      .setDescription(steps.map(s => `• ${s}`).join('\n'))
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [finalEmbed] });
+  },
+};
