@@ -14,7 +14,6 @@ const LYRICS_DIR = path.join(__dirname, '../lyrics');
 async function getAudioDuration(url) {
     if (!url || !ytdl.validateURL(url)) return 0;
     try {
-        // Ajout du header pour éviter le blocage YouTube 429/410 vu dans les logs
         const info = await ytdl.getBasicInfo(url, {
             requestOptions: {
                 headers: {
@@ -45,7 +44,7 @@ module.exports = {
         if (!isLeader && !isModo) {
             return interaction.reply({
                 embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent ajouter des paroles.')],
-                ephemeral: true,
+                flags: 64, // ✅ CORRECTION
             });
         }
 
@@ -53,7 +52,8 @@ module.exports = {
         const artiste = interaction.options.getString('artiste').trim();
         const album = interaction.options.getString('album')?.trim() || null;
 
-        await interaction.deferReply({ ephemeral: true });
+        // ✅ CORRECTION : Utilisation de flags: 64 pour le deferReply
+        await interaction.deferReply({ flags: 64 });
 
         // 1. Récupération de la durée de la musique en cours
         const session = getSession(interaction.guildId);
@@ -98,7 +98,7 @@ module.exports = {
         // 3. Vérification de l'écart de durée (Sécurité Scoring)
         if (currentAudioDuration > 0 && data.duration) {
             const diff = Math.abs(data.duration - currentAudioDuration);
-            if (diff > 25) { // Tolérance de 25s pour les intros YouTube
+            if (diff > 25) { 
                 return interaction.editReply({
                     embeds: [errorEmbed(`⚠️ **Écart trop important !**\n\nYouTube : ${currentAudioDuration}s\nParoles : ${Math.round(data.duration)}s\n\nCherche une version plus proche.`)],
                 });
