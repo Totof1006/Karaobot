@@ -37,12 +37,17 @@ async function playAudio(session, input, onFinish) {
     try {
         if (!input || input.trim().length === 0) return onFinish();
 
-        // 1. COOKIES (Optimisation : SetToken une seule fois suffit, mais ici on sécurise)
+        // 1. COOKIES (Nettoyage des caractères invisibles pour Railway)
         if (process.env.YT_COOKIES_BASE64) {
             try {
-                const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64').toString('utf-8');
+                // ✅ Correction : On décode et on retire TOUS les sauts de ligne et espaces superflus
+                const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64')
+                    .toString('utf-8')
+                    .replace(/[\n\r]/g, '') // Supprime les retours à la ligne
+                    .trim();                // Supprime les espaces en début/fin
+
                 await play.setToken({ youtube: { cookie: decoded } });
-            } catch (e) { console.error("[Cookies] Erreur :", e.message); }
+            } catch (e) { console.error("[Cookies] Erreur formatage :", e.message); }
         }
 
         // 2. INITIALISATION DU PLAYER
@@ -50,7 +55,7 @@ async function playAudio(session, input, onFinish) {
             session.player = createAudioPlayer({
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
             });
-            // ✅ SÉCURITÉ : On s'assure que la connexion est toujours prête
+            // ✅ SÉCURITÉ : On s'assure que la connexion est liée au player
             if (session.connection) session.connection.subscribe(session.player);
         }
 
@@ -76,13 +81,12 @@ async function playAudio(session, input, onFinish) {
             }
         }
 
-        // 4. CRÉATION DU STREAM (Correction : Timeout & Retry)
+        // 4. CRÉATION DU STREAM
         let stream;
         try {
-            // ✅ discordPlayerCompatible est bien, mais on ajoute seek pour plus de flexibilité
             stream = await play.stream(urlToPlay, { 
                 discordPlayerCompatible: true,
-                quality: 1 // Priorise la vitesse de chargement pour le karaoké
+                quality: 1 
             });
         } catch (err) {
             console.error(`❌ [Stream] Erreur play-dl: ${err.message}`);
@@ -94,14 +98,14 @@ async function playAudio(session, input, onFinish) {
             inlineVolume: true
         });
         
-        // ✅ On règle le volume par défaut (0.5 pour ne pas exploser les oreilles)
+        // Volume par défaut
         resource.volume.setVolume(0.5);
 
         // 5. GESTION DES ÉVÉNEMENTS
         session.player.removeAllListeners();
         
         session.player.once(AudioPlayerStatus.Idle, () => {
-            console.log("🎵 [AudioPlayer] Fin de lecture normale.");
+            console.log("🎵 [AudioPlayer] Fin de lecture.");
             onFinish();
         });
 
