@@ -21,7 +21,6 @@ module.exports = {
     const session = getSession(interaction.guildId);
 
     if (!session) {
-      // ✅ CORRECTION
       return interaction.reply({ embeds: [errorEmbed('Aucune session en cours.')], flags: 64 });
     }
 
@@ -29,7 +28,6 @@ module.exports = {
 
     // ── VOIR ──────────────────────────────────────────────────────────────────
     if (sub === 'voir') {
-      // ✅ NOTE : On laisse en public pour que tout le salon puisse voir l'ordre
       return interaction.reply({ embeds: [buildOrderEmbed(session)] });
     }
 
@@ -41,21 +39,21 @@ module.exports = {
       if (!isLeader && !isModo) {
         return interaction.reply({
           embeds: [errorEmbed('Seuls les **Leader** et **Modo** peuvent modifier l\'ordre de passage.')],
-          flags: 64, // ✅ CORRECTION
+          flags: 64,
         });
       }
 
       if (session.phase !== 'registration' && session.phase !== 'singing') {
         return interaction.reply({
           embeds: [errorEmbed('L\'ordre ne peut être modifié qu\'avant ou pendant la session.')],
-          flags: 64, // ✅ CORRECTION
+          flags: 64,
         });
       }
 
       if (session.currentSingerIndex > 0) {
         return interaction.reply({
           embeds: [errorEmbed('La session a déjà commencé, impossible de modifier l\'ordre.')],
-          flags: 64, // ✅ CORRECTION
+          flags: 64,
         });
       }
 
@@ -66,12 +64,12 @@ module.exports = {
       if (pos1 >= max || pos2 >= max) {
         return interaction.reply({
           embeds: [errorEmbed(`Positions invalides. Il y a **${max}** chanteurs (1 à ${max}).`)],
-          flags: 64, // ✅ CORRECTION
+          flags: 64,
         });
       }
 
       if (pos1 === pos2) {
-        return interaction.reply({ embeds: [errorEmbed('Les deux positions sont identiques.')], flags: 64 }); // ✅ CORRECTION
+        return interaction.reply({ embeds: [errorEmbed('Les deux positions sont identiques.')], flags: 64 });
       }
 
       // Échanger
@@ -79,7 +77,6 @@ module.exports = {
       session.players[pos1] = session.players[pos2];
       session.players[pos2] = tmp;
 
-      // ✅ CORRECTION : La confirmation de modification est privée (flags: 64)
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
@@ -106,8 +103,11 @@ function buildOrderEmbed(session) {
 
 function buildOrderList(session) {
   const icons = ['🎤','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣'];
+  if (!session.players || session.players.length === 0) return "*Aucun chanteur inscrit.*";
+  
   return session.players.map((p, i) => {
     const icon   = i < session.currentSingerIndex ? '✅' : icons[i] || `${i+1}.`;
     const status = i === session.currentSingerIndex ? ' ← **en cours**' : '';
     return `${icon} <@${p.userId}>${status}`;
-  }).
+  }).join('\n');
+}
