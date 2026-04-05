@@ -19,41 +19,32 @@ const { checkAnnouncementButton, checkCommandChannel } = require('../utils/chann
 // --- FONCTIONS UTILITAIRES ---
 
 /**
- * Récupère la durée d'une vidéo avec contournement des blocages YouTube (Railway)
- * @returns {Promise<number>} Durée en secondes (180 par défaut si erreur)
+ * Récupère la durée YouTube avec sécurité Railway
  */
 async function getAudioDuration(input) {
     if (!input) return 180;
     try {
-        // 1. Configuration des Cookies (Nettoyage pour Railway)
         if (process.env.YT_COOKIES_BASE64) {
             const decoded = Buffer.from(process.env.YT_COOKIES_BASE64.trim(), 'base64')
                 .toString('utf-8')
                 .replace(/[\n\r]/g, '')
                 .trim();
-            
             await play.setToken({ youtube: { cookie: decoded } });
         }
 
         let videoUrl = input.trim();
-
-        // 2. Recherche si ce n'est pas une URL
         if (!videoUrl.startsWith('http')) {
             const search = await play.search(videoUrl, { limit: 1 });
             if (search.length === 0) return 180;
             videoUrl = search[0].url;
         }
 
-        // 3. Extraction des infos avec play-dl
         const info = await play.video_info(videoUrl);
         const duration = info.video_details.durationInSec;
-
         return (duration && duration > 0) ? duration : 180;
-
     } catch (e) {
         console.error(`[AudioDuration Error] ${e.message}`);
-        // ✅ SÉCURITÉ : Retourne 180s (3min) pour éviter de fermer la session à 0:00
-        return 180;
+        return 180; 
     }
 }
 
@@ -66,7 +57,6 @@ module.exports = {
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
-
             try {
                 await command.execute(interaction);
             } catch (error) {
@@ -96,7 +86,6 @@ module.exports = {
                 const score = parseInt(customId.split('_')[1]);
                 const session = getSession(guildId);
                 if (!session) return interaction.reply({ content: "❌ Aucune session active.", flags: 64 });
-
                 const success = addVote(session, user.id, score);
                 if (success) {
                     return await interaction.reply({ content: `✅ Vote de **${score} ⭐** enregistré !`, flags: 64 });
@@ -105,7 +94,7 @@ module.exports = {
                 }
             }
 
-            // ✅ BOUTONS : MODE ENTRAÎNEMENT
+            // ✅ BOUTONS : MODE ENTRAÎNEMENT (VÉRIFICATION DOUBLE DURÉE)
             if (customId.startsWith('check_train_')) {
                 await interaction.deferReply({ flags: 64 });
 
@@ -113,35 +102,45 @@ module.exports = {
                 const songIndex = parseInt(parts[2]) - 1;
                 const userId = parts[3];
 
-                if (user.id !== userId) {
-                    return interaction.editReply({ content: "❌ Ce n'est pas votre session." });
-                }
+                if (user.id !== userId) return interaction.editReply({ content: "❌ Ce n'est pas votre session." });
 
                 const session = global.trainingSessions?.get(userId);
-                if (!session || !session.songs[songIndex]) {
-                    return interaction.editReply({ content: "❌ Musique introuvable." });
-                }
+                if (!session || !session.songs[songIndex]) return interaction.editReply({ content: "❌ Musique introuvable." });
 
                 const songQuery = session.songs[songIndex];
-                
-                // Utilisation de la fonction sécurisée (Anti 0:00)
-                const youtubeDuration = await getAudioDuration(songQuery); 
-                const apiDuration = 180; 
 
-                const diff = Math.abs(youtubeDuration - apiDuration);
-                const isMatch = diff <= 15; // Tolérance de 15s
+                // 1. Durée YouTube (Sécurité)
+                const youtubeDuration = await getAudioDuration(songQuery);
+
+                // 2. Durée du fichier .lrc (Ton GitHub)
+                const lyricsData = getLyrics(songQuery);
+                const lrcDuration = lyricsData ? Math.floor(lyricsData.durationMs / 1000) : null;
 
                 const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`;
 
                 const embed = new EmbedBuilder()
                     .setTitle(`Vérification : ${songQuery}`)
-                    .setColor(isMatch ? 0x00FF00 : 0xFFAA00)
+                    .setColor(lrcDuration ? 0x00FF00 : 0xFFAA00)
                     .addFields(
-                        { name: '⏱️ Attendu', value: formatTime(apiDuration), inline: true },
-                        { name: '📺 Détecté', value: formatTime(youtubeDuration), inline: true },
-                        { name: '📊 Verdict', value: isMatch ? '✅ **Prêt pour le chant !**' : `⚠️ **Écart de ${Math.round(diff)}s.**` }
-                    )
-                    .setFooter({ text: "Note : Si YouTube bloque l'info, une durée de 3:00 est appliquée par sécurité." });
+                        { 
+                            name: '⏱️ Durée .lrc (GitHub)', 
+                            value: lrcDuration ? `✅ **${formatTime(lrcDuration)}**` : '❌ Fichier introuvable', 
+                            inline: true 
+                        },
+                        { 
+                            name: '📺 Durée YouTube', 
+                            value: youtubeDuration === 180 ? '⚠️ 3:00 (Bloqué/Défaut)' : `✅ **${formatTime(youtubeDuration)}**`, 
+                            inline: true 
+                        }
+                    );
+
+                // Verdict final pour éviter le crash
+                if (!lrcDuration) {
+                    embed.setDescription("⚠️ **Attention :** Le fichier lyrics est introuvable sur GitHub. Le test risque de ne pas afficher de paroles.");
+                } else {
+                    const diff = Math.abs(lrcDuration - youtubeDuration);
+                    embed.setDescription(diff > 15 ? `⚠️ Écart de **${diff}s** détecté entre les paroles et la vidéo.` : "✅ Les durées correspondent. Prêt pour `/lancer-test` !");
+                }
 
                 return await interaction.editReply({ embeds: [embed] });
             }
