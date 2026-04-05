@@ -8,7 +8,9 @@ const DB_PATH = '/data/events.json';
 
 function loadDB() {
     if (!fs.existsSync(DB_PATH)) {
-        fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+        // ✅ Sécurité : S'assurer que le dossier parent existe
+        const dir = path.dirname(DB_PATH);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(DB_PATH, JSON.stringify({}));
         return {};
     }
@@ -16,30 +18,38 @@ function loadDB() {
         return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
     } catch (err) {
         console.error('[eventDB] Fichier JSON corrompu, réinitialisation :', err.message);
-        fs.writeFileSync(DB_PATH, JSON.stringify({}));
         return {};
     }
 }
 
 function saveDB(db) {
-    const tmp = DB_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-    fs.renameSync(tmp, DB_PATH);
+    try {
+        const tmp = DB_PATH + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+        fs.renameSync(tmp, DB_PATH);
+    } catch (err) {
+        console.error('[eventDB] Erreur lors de la sauvegarde :', err.message);
+    }
 }
 
-// ─── FONCTION DE FORMATAGE (Celle qui manquait !) ────────────────────────────
+// ─── FONCTION DE FORMATAGE ───────────────────────────────────────────────────
 
 function formatDate(dateInput) {
     if (!dateInput) return "Date inconnue";
-    const date = (typeof dateInput === 'string') ? new Date(dateInput) : dateInput;
+    // ✅ Conversion forcée en objet Date si c'est une string ISO provenant du JSON
+    const date = (dateInput instanceof Date) ? dateInput : new Date(dateInput);
     
+    // Vérification de la validité de la date
+    if (isNaN(date.getTime())) return "Date invalide";
+
     return date.toLocaleDateString('fr-FR', {
         weekday: 'long',
         day: 'numeric',
         month: 'long',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZone: 'Europe/Paris' // ✅ Recommandé pour éviter les décalages serveur
     }).replace(':', 'h');
 }
 
@@ -47,26 +57,32 @@ function formatDate(dateInput) {
 
 function createEvent(guildId, opts) {
     const db = loadDB();
-    if (!db[guildId]) db[guildId] = {};
+    
+    // ✅ Conversion systématique en ISOString pour le stockage JSON
+    const toISO = (d) => (d instanceof Date) ? d.toISOString() : d;
 
-    db[guildId].event = {
-        hostId            : opts.hostId,
-        channelId         : opts.channelId, 
-        announceChannelId : opts.announceChannelId || opts.channelId,
-        title             : opts.title,
-        eventDate         : (opts.eventDate instanceof Date) ? opts.eventDate.toISOString() : opts.eventDate,
-        registrationStart : (opts.registrationStart instanceof Date) ? opts.registrationStart.toISOString() : opts.registrationStart,
-        registrationEnd   : (opts.registrationEnd instanceof Date) ? opts.registrationEnd.toISOString() : opts.registrationEnd,
-        announceMsgId     : opts.announceMsgId  || null,
-        discordEventId    : opts.discordEventId || null,
-        reminderSent      : false,
-        closeSent         : false,
-        registrations     : [],
+    db[guildId] = {
+        event: {
+            hostId            : opts.hostId,
+            channelId         : opts.channelId, 
+            announceChannelId : opts.announceChannelId || opts.channelId,
+            title             : opts.title,
+            eventDate         : toISO(opts.eventDate),
+            registrationStart : toISO(opts.registrationStart),
+            registrationEnd   : toISO(opts.registrationEnd),
+            announceMsgId     : opts.announceMsgId  || null,
+            discordEventId    : opts.discordEventId || null,
+            reminderSent      : false,
+            closeSent         : false,
+            registrations     : [],
+        }
     };
 
     saveDB(db);
     return db[guildId].event;
 }
+
+// ... (getEvent, saveEvent, deleteEvent restent identiques et corrects)
 
 function getEvent(guildId) {
     const db = loadDB();
@@ -95,29 +111,34 @@ function registerPlayer(guildId, userId, username) {
     const event = db[guildId]?.event;
     if (!event) return { ok: false, reason: 'no_event' };
 
-    if (event.registrations.find(r => r.userId === userId)) return { ok: false, reason: 'already' };
+    // ✅ Normalisation du userId (String) pour éviter les types discord.js complexes
+    const uid = String(userId);
+    if (event.registrations.find(r => String(r.userId) === uid)) {
+        return { ok: false, reason: 'already' };
+    }
+    
     if (event.registrations.length >= MAX_SINGERS) return { ok: false, reason: 'full' };
 
-    event.registrations.push({ userId, username, songs: [] });
+    event.registrations.push({ userId: uid, username, songs: [] });
     saveDB(db);
     return { ok: true };
 }
+
+// ... (setPlayerSongs, unregisterPlayer, isRegistrationOpen restent corrects)
 
 function setPlayerSongs(guildId, userId, songs) {
     const db    = loadDB();
     const event = db[guildId]?.event;
     if (!event) return false;
     
-    const reg = event.registrations.find(r => r.userId === userId);
+    const reg = event.registrations.find(r => String(r.userId) === String(userId));
     if (!reg)  return false;
     
-    // On mappe les chansons en gardant la flexibilité pour le titre complet
     reg.songs = songs.map(s => ({
         title: s.title || "Inconnu",
         url: s.url || null,
         apiDuration: s.apiDuration || 0,
-        verified: s.verified || false
-        // Note: L'artiste est désormais souvent inclus dans le titre par play-dl
+        verified: !!s.verified
     }));
     
     saveDB(db);
@@ -129,11 +150,11 @@ function unregisterPlayer(guildId, userId) {
     const event = db[guildId]?.event;
     if (!event) return false;
     
-    const before = event.registrations.length;
-    event.registrations = event.registrations.filter(r => r.userId !== userId);
+    const countBefore = event.registrations.length;
+    event.registrations = event.registrations.filter(r => String(r.userId) !== String(userId));
     
     saveDB(db);
-    return event.registrations.length < before;
+    return event.registrations.length < countBefore;
 }
 
 function isRegistrationOpen(event) {
@@ -146,16 +167,10 @@ function isRegistrationOpen(event) {
 
 function getAllEvents() {
     const db = loadDB();
-    const list = [];
-    for (const guildId in db) {
-        if (db[guildId].event) {
-            list.push({ guildId, ...db[guildId].event });
-        }
-    }
-    return list;
+    return Object.entries(db)
+        .filter(([_, data]) => data.event)
+        .map(([guildId, data]) => ({ guildId, ...data.event }));
 }
-
-// ─── EXPORTS (VÉRIFIÉ) ────────────────────────────────────────────────────────
 
 module.exports = {
     createEvent, 
@@ -166,6 +181,6 @@ module.exports = {
     unregisterPlayer, 
     setPlayerSongs,
     getAllEvents,
-    isRegistrationOpen, // Ajouté pour interactionCreate
-    formatDate          // Ajouté pour evenement.js et interactionCreate
+    isRegistrationOpen,
+    formatDate 
 };
