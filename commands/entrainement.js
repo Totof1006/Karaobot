@@ -11,7 +11,7 @@ const {
     PermissionFlagsBits 
 } = require('discord.js');
 
-// ✅ Ajout de l'import pour le receiver (si non présent dans ta sauvegarde, nécessaire pour l'entraînement)
+// ✅ Imports pour le receiver et la gestion vocale
 const { setupUserReceiver } = require('../utils/voiceReceiver');
 const { joinVoiceChannel, entersState, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
 
@@ -29,15 +29,15 @@ module.exports = {
         );
 
         if (!channel) {
-            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: 64 }); // ✅ Flag 64
+            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: 64 });
         }
 
         // Vérification si occupé
         if (channel.members.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
-            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: 64 }); // ✅ Flag 64
+            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: 64 });
         }
 
-        // ── 2. MODAL D'ENTRÉE (SANS NETTOYAGE PRÉALABLE) ─────────────────────
+        // ── 2. MODAL D'ENTRÉE ───────────────────────────────────────────────
         const modal = new ModalBuilder()
             .setCustomId(`modal_train_${interaction.user.id}`)
             .setTitle('Inscription Entraînement');
@@ -75,29 +75,15 @@ module.exports = {
                 filter: i => i.customId === `modal_train_${interaction.user.id}`
             });
 
-            await submitted.deferReply({ flags: 64 }); // ✅ Flag 64
+            await submitted.deferReply({ flags: 64 });
 
             const songs = [
                 submitted.fields.getTextInputValue('song1'),
                 submitted.fields.getTextInputValue('song2'),
                 submitted.fields.getTextInputValue('song3')
-            ].filter(s => s && s.trim().length > 2); // ✅ Ton filtre exact préservé
+            ].filter(s => s && s.trim().length > 2);
 
-            // ── 4. INITIALISATION SESSION ──────────────────────────────────────
-            if (!global.trainingSessions) global.trainingSessions = new Map();
-
-            const session = {
-                userId: interaction.user.id,
-                guildId: interaction.guild.id,
-                channelId: channel.id,
-                songs: songs,
-                precisionTicks: 0, // ✅ Validé : indispensable
-                startTime: Date.now()
-            };
-
-            global.trainingSessions.set(interaction.user.id, session);
-
-            // ── 5. CONNEXION ET ÉCOUTE ─────────────────────────────────────────
+            // ── 4. CONNEXION VOCALE ───────────────────────────────────────────
             let connection = getVoiceConnection(interaction.guild.id);
             if (!connection) {
                 connection = joinVoiceChannel({
@@ -110,8 +96,23 @@ module.exports = {
             }
 
             await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-            
-            // ✅ Validé : Activation de l'écoute utilisateur
+
+            // ── 5. INITIALISATION SESSION ──────────────────────────────────────
+            if (!global.trainingSessions) global.trainingSessions = new Map();
+
+            const session = {
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                channelId: channel.id,
+                songs: songs,
+                connection: connection, // ✅ Point validé : Lien pour le Receiver
+                precisionTicks: 0,       // ✅ Validé : Indispensable pour la synchro
+                startTime: Date.now()
+            };
+
+            global.trainingSessions.set(interaction.user.id, session);
+
+            // ✅ Activation de l'écoute utilisateur (Receiver)
             setupUserReceiver(session, interaction.user.id);
 
             // ── 6. ENVOI DE L'INTERFACE ─────────────────────────────────────────
