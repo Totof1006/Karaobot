@@ -1,3 +1,9 @@
+Voici la version corrigée de ton fichier commands/entrainement.js.
+
+L'objectif ici est de sécuriser la capture du formulaire. Comme nous l'avons vu, utiliser interaction.awaitModalSubmit peut échouer si l'interaction est instable. Passer par interaction.client garantit que le bot écoute la réponse de manière globale et fiable.
+
+📄 Fichier : commands/entrainement.js corrigé
+JavaScript
 const { 
     SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, 
     EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, 
@@ -13,8 +19,8 @@ module.exports = {
 
     async execute(interaction) {
         // --- NOTE IMPORTANTE ---
-        // On NE FAIT PAS de deferReply() ici, car on doit envoyer un Modal.
-        // Un Modal doit être la TOUTE PREMIÈRE réponse à une interaction.
+        // Le Modal doit être la TOUTE PREMIÈRE réponse. 
+        // Pas de deferReply() ici.
 
         const channelName = 'Entraînement 1';
         const channel = interaction.guild.channels.cache.find(c => 
@@ -22,14 +28,14 @@ module.exports = {
         );
 
         if (!channel) {
-            // CORRECTION : Utilisation de flags: 64 pour remplacer ephemeral: true
-            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: [64] });
+            // ✅ Utilisation de flags: 64 (Standard v14)
+            return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: 64 });
         }
 
         // Vérification d'occupation
         const humanMembers = channel.members.filter(m => !m.user.bot);
         if (humanMembers.size > 0 && (!global.trainingSessions || !global.trainingSessions.has(interaction.user.id))) {
-            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: [64] });
+            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: 64 });
         }
 
         // --- PRÉPARATION DU MODAL ---
@@ -65,32 +71,30 @@ module.exports = {
         );
 
         // --- ENVOI DU MODAL ---
-        // On l'envoie immédiatement pour éviter le timeout de 3 secondes
         await interaction.showModal(modal);
 
-        // --- ATTENTE DE LA RÉPONSE DU MODAL ---
-        const submitted = await interaction.awaitModalSubmit({ 
+        // --- ATTENTE DE LA RÉPONSE (CORRECTION CLIENT) ---
+        // ✅ On utilise interaction.client pour une capture plus robuste sur Railway
+        const submitted = await interaction.client.awaitModalSubmit({ 
             time: 60000, 
             filter: i => i.customId === `modal_train_${interaction.user.id}` 
         }).catch(() => null);
 
-        // Si l'utilisateur ferme le modal ou attend trop longtemps, on arrête là.
+        // Si l'utilisateur ferme le modal ou attend trop longtemps, on s'arrête.
         if (!submitted) return;
 
-        // --- MAINTENANT ON DIT À DISCORD DE PATIENTER ---
-        // Une fois le modal soumis, on a à nouveau 3 secondes. 
-        // Le deferReply ici donne 15 minutes pour la suite (connexion vocale).
-        // CORRECTION : Utilisation de flags: 64
-        await submitted.deferReply({ flags: [64] });
+        // --- DÉLAI DE TRAITEMENT ---
+        // ✅ Utilisation de flags: 64
+        await submitted.deferReply({ flags: 64 });
 
-        // Récupération des textes
+        // Récupération et nettoyage des textes
         const songs = [
             submitted.fields.getTextInputValue('s1'),
             submitted.fields.getTextInputValue('s2'),
             submitted.fields.getTextInputValue('s3')
         ].filter(s => s && s.trim().length > 2);
 
-        // Initialisation de la session globale
+        // Initialisation de la session globale (Sécurité au cas où index.js redémarre)
         if (!global.trainingSessions) global.trainingSessions = new Map();
         
         const session = { 
@@ -114,18 +118,18 @@ module.exports = {
         }
 
         try {
-            // On attend que la connexion soit prête (max 15s)
+            // Attente de la connexion (max 15s)
             await entersState(connection, VoiceConnectionStatus.Ready, 15000);
             session.connection = connection;
             setupUserReceiver(session, interaction.user.id);
         } catch (err) {
-            console.error("Échec de la connexion vocale:", err);
+            console.error("❌ Échec connexion vocale:", err);
             if (connection) connection.destroy();
-            session.connection = null;
+            global.trainingSessions.delete(interaction.user.id);
             return submitted.editReply("❌ Erreur lors de la connexion au salon vocal.");
         }
 
-        // --- CRÉATION DE L'INTERFACE (BOUTONS & EMBED) ---
+        // --- INTERFACE (BOUTONS & EMBED) ---
         const buttons = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`check_1_${interaction.user.id}`).setLabel('Tester n°1').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId(`check_2_${interaction.user.id}`).setLabel('Tester n°2').setStyle(ButtonStyle.Secondary).setDisabled(songs.length < 2),
@@ -135,12 +139,12 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle("🎤 Prêt pour l'entraînement")
-            .setDescription(`Bonjour <@${interaction.user.id}> !\n\nTes musiques ont été ajoutées. Le bot utilisera le cache ou YouTube pour les jouer.\n\n**Actions :**\n1. Rejoins <#${channel.id}>\n2. Utilise \`/lancer-test\` pour démarrer.`);
+            .setDescription(`Bonjour <@${interaction.user.id}> !\n\nTes musiques ont été ajoutées.\n\n**Actions :**\n1. Rejoins <#${channel.id}>\n2. Utilise \`/lancer-test\` pour démarrer.`);
 
-        // Envoi du message récapitulatif dans le salon de vocal (ou salon dédié)
+        // Envoi dans le salon vocal
         await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [buttons] });
         
-        // Confirmation finale à l'utilisateur (fermeture du chargement)
+        // Finalisation de l'interaction
         await submitted.editReply(`✅ Inscription réussie ! Rendez-vous dans <#${channel.id}>`);
     }
 };
