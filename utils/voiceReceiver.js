@@ -1,68 +1,78 @@
 const { EndBehaviorType } = require('@discordjs/voice');
-const { analyzeVoiceActivity } = require('./voiceAnalyzer'); // Import en haut pour éviter les répétitions
+const { analyzeVoiceActivity } = require('./voiceAnalyzer');
 
 /**
- * Initialise un receiver PRO pour un utilisateur donné
+ * Initialise un receiver pour un utilisateur donné
  */
-function setupUserReceiver(session, userId) {
+async function setupUserReceiver(session, userId) {
     try {
-        // --- SÉCURITÉ : NETTOYAGE PRÉALABLE ---
-        // Si un flux existe déjà pour cette session, on le ferme proprement avant de recommencer
+        // 1. SÉCURITÉ : NETTOYAGE PRÉALABLE
         if (session.receiverStream) {
             stopReceiver(session);
         }
 
-        if (!session.connection) return;
+        if (!session.connection || !session.connection.receiver) {
+            console.error("[Receiver] Pas de connexion active pour s'abonner.");
+            return;
+        }
 
-        const receiver = session.connection.receiver;
-
-        // On s'abonne au flux vocal de l'utilisateur
-        // Utilisation de Manual pour garder le contrôle total sur la durée de vie du flux
-        const audioStream = receiver.subscribe(userId, {
+        // 2. ABONNEMENT AU FLUX (Mode Manuel)
+        // On s'abonne aux paquets Opus de l'utilisateur
+        const audioStream = session.connection.receiver.subscribe(userId, {
             end: {
-                behavior: EndBehaviorType.Manual
+                behavior: EndBehaviorType.Manual // ✅ Garde le flux ouvert même pendant les silences
             }
         });
 
-        // Analyse de l'activité vocale
-        // On passe par un wrapper pour s'assurer que l'incrémentation est stable
+        console.log(`🎙️ [Receiver] Écoute démarrée pour l'utilisateur : ${userId}`);
+
+        // 3. ANALYSE ET SCORE
+        // On passe le flux à l'analyseur qui va transformer l'Opus en données d'énergie
         analyzeVoiceActivity(audioStream, (energy) => {
-            // On ne compte les ticks que si une musique est en cours de lecture
+            // ✅ SÉCURITÉ : On ne compte les points QUE si la musique tourne
+            // Cela évite que le chanteur gagne des points en parlant pendant la pause
             if (session.player && session.player.state.status === 'playing') {
-                session.precisionTicks++;
+                // Seuil d'énergie minimum pour éviter de compter le bruit de fond
+                if (energy > 0.01) { 
+                    session.precisionTicks = (session.precisionTicks || 0) + 1;
+                }
             }
         });
 
+        // 4. GESTION DES ERREURS DE FLUX
         audioStream.on('error', err => {
-            if (err.code === 'ERR_STREAM_PREMATURE_CLOSE') return; // Ignorer les fermetures normales
+            if (err.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
             console.error("[Receiver] Erreur flux vocal :", err.message);
         });
 
-        // On stocke le flux pour pouvoir le stopper proprement
+        // ✅ IMPORTANT : Nettoyer si l'utilisateur quitte le vocal subitement
+        audioStream.on('end', () => {
+            console.log(`[Receiver] Flux terminé pour ${userId}`);
+            session.receiverStream = null;
+        });
+
         session.receiverStream = audioStream;
 
     } catch (err) {
-        console.error("[Receiver] setupUserReceiver error:", err);
+        console.error("[Receiver] Erreur setupUserReceiver:", err);
     }
 }
 
 /**
- * Stop PRO
+ * Arrêt propre du receiver
  */
 function stopReceiver(session) {
     try {
         if (session.receiverStream) {
-            // On enlève les listeners pour éviter les fuites de mémoire (Memory Leaks)
-            session.receiverStream.removeAllListeners();
-            
-            // On détruit le flux
+            // On force la fin du flux Opus
             session.receiverStream.destroy();
+            session.receiverStream.removeAllListeners();
             session.receiverStream = null;
             
-            console.log("[Receiver] Flux vocal stoppé proprement.");
+            console.log("[Receiver] Flux vocal détruit proprement.");
         }
     } catch (e) {
-        console.error("[Receiver] stopReceiver error:", e);
+        console.error("[Receiver] Erreur stopReceiver:", e);
     }
 }
 
