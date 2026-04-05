@@ -15,19 +15,21 @@ module.exports = {
     const isLeader = hasRole(interaction.member, ROLE_LEADER);
     const isModo   = hasRole(interaction.member, ROLE_MODO);
 
+    // ✅ CORRECTION : Erreur de permission en privé
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent démarrer une session.')],
-        ephemeral: true,
+        flags: 64,
       });
     }
 
     const guildId = interaction.guildId;
 
+    // ✅ CORRECTION : Alerte session déjà en cours en privé
     if (getSession(guildId)) {
       return interaction.reply({
         embeds: [errorEmbed('Une session est déjà en cours ! Utilisez `/stop` pour l\'arrêter.')],
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -36,6 +38,8 @@ module.exports = {
     const session = createSession(guildId, interaction.user.id, interaction.channelId);
 
     const embed = registrationEmbed(session);
+    
+    // ✅ NOTE : Pas de flags: 64 ici car l'embed d'inscription doit être visible par TOUS le monde
     const message = await interaction.reply({
       embeds: [embed],
       components: [joinButton(), startButton()],
@@ -43,7 +47,6 @@ module.exports = {
     });
 
     session.registrationMessage = message;
-    // channelId déjà défini dans createSession — pas besoin de le réassigner
 
     console.log(`[Karaoké] Session créée sur ${guildId} par ${interaction.user.username}`);
   },
