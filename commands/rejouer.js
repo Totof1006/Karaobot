@@ -2,10 +2,10 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder,
         ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const { getSession, getLastSession, createRematchSession } = require('../utils/gameState');
 const { getRematchCount, incrementRematchCount }           = require('../utils/persist');
-const { getEvent, formatDate }                             = require('../utils/eventDB');
+const { getEvent, formatDate }                               = require('../utils/eventDB');
 const { errorEmbed }                                       = require('../utils/embeds');
 const { ROLE_LEADER, ROLE_MODO, hasRole } = require('../utils/roleManager');
-const { checkSessionChannel }                              = require('../utils/channelGuard');
+const { checkSessionChannel }                               = require('../utils/channelGuard');
 
 const { MAX_REMATCHES }                                    = require('../utils/constants');
 
@@ -22,13 +22,13 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent lancer une revanche.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
     const guard = checkSessionChannel(interaction);
     if (!guard.ok) {
-      return interaction.reply({ embeds: [errorEmbed(guard.reason)], ephemeral: true });
+      return interaction.reply({ embeds: [errorEmbed(guard.reason)], flags: 64 }); // ✅ CORRECTION
     }
 
     const guildId = interaction.guildId;
@@ -36,7 +36,7 @@ module.exports = {
     if (getSession(guildId)) {
       return interaction.reply({
         embeds: [errorEmbed('Une session est déjà en cours ! Utilisez `/stop` d\'abord.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -44,7 +44,7 @@ module.exports = {
     if (!last) {
       return interaction.reply({
         embeds: [errorEmbed('Aucune session précédente trouvée. Lance d\'abord une session avec `/karaoke`.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -73,6 +73,7 @@ module.exports = {
             )
             .setFooter({ text: 'À très bientôt pour de nouvelles sessions ! 🎶' }),
         ],
+        // ✅ NOTE : Ce message est public pour marquer la fin de soirée
       });
     }
 
@@ -84,7 +85,7 @@ module.exports = {
     if (!session) {
       return interaction.reply({
         embeds: [errorEmbed('Impossible de créer la revanche. Données de session introuvables.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -119,6 +120,7 @@ module.exports = {
         .setStyle(ButtonStyle.Danger),
     );
 
+    // ✅ NOTE : Public pour que les chanteurs voient le tirage
     await interaction.reply({ embeds: [embed], components: [row] });
   },
 };
