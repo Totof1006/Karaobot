@@ -24,7 +24,7 @@ module.exports = {
     if (!isLeader && !isModo) {
       return interaction.reply({
         embeds: [errorEmbed('Seuls les **Leader** 👑 et **Modo** 🛡️ peuvent ouvrir le salon.')],
-        ephemeral: true,
+        flags: 64, // ✅ CORRECTION
       });
     }
 
@@ -32,17 +32,16 @@ module.exports = {
     const guild        = interaction.guild;
     const event        = getEvent(interaction.guildId);
 
-    await interaction.deferReply();
+    // ✅ CORRECTION : Defer privé (flags: 64) pour le retour technique
+    await interaction.deferReply({ flags: 64 });
 
     // Sauvegarder le salon vocal
     saveVoiceChannel(interaction.guildId, voiceChannel.id);
 
-    // Ouvrir UNIQUEMENT le salon vocal aux 4 rôles
-    // Le salon texte #karaoké-annonces reste public — ne pas y appliquer setupChannelPermissions
+    // Ouvrir UNIQUEMENT le salon vocal aux rôles spécifiques via roleManager
     await openChannelForEvent(voiceChannel, guild);
 
-    // Ouvrir les micros des chanteurs inscrits dès maintenant
-    // (période d'arrivée : les chanteurs peuvent parler librement)
+    // Ouvrir les micros des chanteurs inscrits (période d'accueil)
     const singerIds = event?.registrations?.map(r => r.userId) || [];
     if (singerIds.length > 0) {
       await unmuteSingersOnly(guild, voiceChannel, singerIds);
@@ -50,7 +49,7 @@ module.exports = {
 
     const eventTitle = event ? `**${event.title}**` : 'la session karaoké';
 
-    // Annoncer dans le salon
+    // ✅ ANNONCE PUBLIQUE : Pour prévenir tout le monde dans le salon
     await interaction.channel.send({
       embeds: [
         new EmbedBuilder()
@@ -69,6 +68,7 @@ module.exports = {
       ],
     });
 
+    // ✅ CONFIRMATION PRIVÉE (editReply)
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
