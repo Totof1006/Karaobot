@@ -4,18 +4,26 @@ const path = require('path');
 const DB_PATH = '/data/scores.json';
 require('dotenv').config();
 
-// --- SYNCHRONISATION DES COOKIES YOUTUBE ---
+// --- SYNCHRONISATION DES COOKIES YOUTUBE ET INITIALISATION DATA ---
 if (process.env.YT_COOKIES_BASE64) {
     try {
         const cookieContent = Buffer.from(process.env.YT_COOKIES_BASE64, 'base64').toString('utf-8');
-        // ✅ Point validé : Création du dossier /data si inexistant pour éviter le crash Railway
+        
+        // ✅ Point validé : Création du dossier /data si inexistant
         if (!fs.existsSync('/data')) {
             fs.mkdirSync('/data', { recursive: true });
         }
+
+        // ✅ Point validé : Initialisation du fichier scores.json si inexistant pour éviter les erreurs de lecture
+        if (!fs.existsSync(DB_PATH)) {
+            fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2));
+            console.log("✅ Fichier scores.json initialisé.");
+        }
+
         fs.writeFileSync('/data/youtube_cookies.txt', cookieContent);
         console.log("✅ Fichier youtube_cookies.txt généré dans le volume.");
     } catch (err) {
-        console.error("❌ Erreur lors de la génération des cookies :", err.message);
+        console.error("❌ Erreur lors de la génération des cookies ou data :", err.message);
     }
 }
 
