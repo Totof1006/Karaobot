@@ -32,9 +32,11 @@ module.exports = {
             return interaction.reply({ content: `⚠️ Salon "${channelName}" introuvable.`, flags: 64 });
         }
 
-        // Vérification si occupé
-        if (channel.members.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
-            return interaction.reply({ content: "⚠️ Le salon est déjà occupé.", flags: 64 });
+        // ✅ CORRECTION : On ne compte que les humains (ignore le bot lui-même)
+        const humanMembers = channel.members.filter(m => !m.user.bot);
+        
+        if (humanMembers.size > 0 && !global.trainingSessions?.has(interaction.user.id)) {
+            return interaction.reply({ content: "⚠️ Le salon est déjà occupé par un autre chanteur.", flags: 64 });
         }
 
         // ── 2. MODAL D'ENTRÉE ───────────────────────────────────────────────
@@ -105,8 +107,8 @@ module.exports = {
                 guildId: interaction.guild.id,
                 channelId: channel.id,
                 songs: songs,
-                connection: connection, // ✅ Point validé : Lien pour le Receiver
-                precisionTicks: 0,       // ✅ Validé : Indispensable pour la synchro
+                connection: connection,
+                precisionTicks: 0,
                 startTime: Date.now()
             };
 
